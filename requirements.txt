@@ -1,0 +1,19 @@
+# Core dependencies
+discord.py>=2.3.0
+python-dotenv>=1.0.0
+
+# LangChain and LangGraph
+langgraph>=0.2.0
+langchain>=0.1.0
+langchain-openai>=0.1.0
+langchain-core>=0.1.0
+
+# Meta/Facebook SDK
+facebook-business>=21.0.0
+
+# Utilities
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Logging and monitoring (optional)
+colorlog>=6.7.0

@@ -1,0 +1,14 @@
+{
+  "dockerfile_path": "Dockerfile",
+  "graphs": {
+    "meta_ads_agent": "./graph.py:graph"
+  },
+  "env": {
+    "LANGCHAIN_TRACING_V2": "true",
+    "LANGCHAIN_PROJECT": "MetaAdsBot"
+  },
+  "python_version": "3.11",
+  "dependencies": [
+    "."
+  ]
+}
