@@ -128,8 +128,8 @@ Return your plan as JSON. For multi-step operations, use an array:
     "reasoning": "your analysis",
     "intent": "what the user wants",
     "operations": [
-        {"sdk_method": "method1", "parameters": {...}},
-        {"sdk_method": "method2", "parameters": {...}, "uses_result_from": 0}
+        {"sdk_method": "method1", "parameters": {}},
+        {"sdk_method": "method2", "parameters": {}, "uses_result_from": 0}
     ]
 }
 
@@ -138,7 +138,7 @@ For single operations:
     "reasoning": "your analysis",
     "intent": "what the user wants",
     "sdk_method": "method_name",
-    "parameters": {...}
+    "parameters": {}
 }
 
 Think through the COMPLETE solution before responding."""
