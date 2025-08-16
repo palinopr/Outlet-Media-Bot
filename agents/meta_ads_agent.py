@@ -7,7 +7,7 @@ import os
 import logging
 import json
 import inspect
-from typing import Dict, Any, List, TypedDict, Annotated
+from typing import Dict, Any, List, TypedDict, Annotated, Literal
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
 from langchain_openai import ChatOpenAI
@@ -45,29 +45,213 @@ class MetaAdsAgent:
             api_key=os.getenv("OPENAI_API_KEY")
         )
         
+        # Initialize thinking history
+        self.thinking_history = []
+        
         # Create the graph
         self.graph = self._create_graph()
     
+    async def think(self, context: str, previous_thought: str = None) -> Dict[str, Any]:
+        """
+        Autonomous thinking method that can be called multiple times.
+        Returns a thought process and decision.
+        """
+        thinking_prompt = """You are an autonomous thinking module for a Meta Ads agent.
+        
+Your role is to think through problems step by step, recognize patterns, and make decisions.
+
+THINKING PRINCIPLES:
+- Break down complex problems into simple patterns
+- Recognize similarities between different requests
+- Learn from context, don't memorize specifics
+- Question your assumptions and revise if needed
+- Think about WHY something works, not just WHAT works
+
+PATTERN RECOGNITION:
+- When you see a request, think: "What pattern does this follow?"
+- Examples of patterns:
+  • "Find X and update it" → Search pattern + Update pattern
+  • "Get metrics for Y" → Data retrieval pattern
+  • "Compare A and B" → Comparison pattern
+- Apply patterns broadly, not to specific cases
+
+DECISION MAKING:
+- Based on your thinking, decide:
+  • What needs to be done?
+  • What's the most efficient approach?
+  • What could go wrong?
+  • How to verify success?
+
+Context: {context}
+Previous thought: {previous_thought}
+
+Think through this and return your reasoning as JSON:
+{{
+    "pattern_recognized": "what pattern does this follow",
+    "key_insights": ["insight 1", "insight 2"],
+    "decision": "what to do based on this thinking",
+    "potential_issues": ["issue 1", "issue 2"],
+    "verification_approach": "how to verify this worked"
+}}"""
+
+        messages = [
+            SystemMessage(content=thinking_prompt.format(
+                context=context,
+                previous_thought=previous_thought or "None"
+            ))
+        ]
+        
+        response = await self.llm.ainvoke(messages)
+        
+        try:
+            # Parse thinking response
+            content = response.content
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0]
+            thought = json.loads(content)
+            
+            # Store in thinking history
+            self.thinking_history.append({
+                "context": context,
+                "thought": thought,
+                "timestamp": __import__('time').time()
+            })
+            
+            logger.info(f"Thinking: {thought.get('pattern_recognized', 'unknown pattern')}")
+            return thought
+        except Exception as e:
+            logger.error(f"Thinking error: {e}")
+            return {
+                "pattern_recognized": "error in thinking",
+                "decision": "proceed with caution",
+                "error": str(e)
+            }
+    
     def _create_graph(self):
-        """Create the LangGraph workflow"""
+        """Create the LangGraph workflow with thinking cycles"""
         workflow = StateGraph(AgentState)
         
-        # Add nodes
+        # Add nodes - now with a thinking review node
         workflow.add_node("understand_request", self.understand_request)
+        workflow.add_node("review_thinking", self.review_thinking)
         workflow.add_node("execute_sdk_call", self.execute_sdk_call)
+        workflow.add_node("verify_execution", self.verify_execution)
         workflow.add_node("format_response", self.format_response)
         
-        # Add edges
+        # Add edges with conditional routing
         workflow.set_entry_point("understand_request")
-        workflow.add_edge("understand_request", "execute_sdk_call")
-        workflow.add_edge("execute_sdk_call", "format_response")
+        
+        # After understanding, review the thinking
+        workflow.add_edge("understand_request", "review_thinking")
+        
+        # From review, decide whether to proceed or rethink
+        workflow.add_conditional_edges(
+            "review_thinking",
+            self.should_proceed_or_rethink,
+            {
+                "proceed": "execute_sdk_call",
+                "rethink": "understand_request"
+            }
+        )
+        
+        # After execution, verify if it worked
+        workflow.add_edge("execute_sdk_call", "verify_execution")
+        
+        # From verification, decide whether to retry or format response
+        workflow.add_conditional_edges(
+            "verify_execution",
+            self.should_retry_or_continue,
+            {
+                "retry": "understand_request",
+                "continue": "format_response"
+            }
+        )
+        
         workflow.add_edge("format_response", END)
         
         return workflow.compile()
     
+    async def review_thinking(self, state: AgentState) -> AgentState:
+        """Review the thinking and decide if we should proceed or rethink"""
+        plan = state.get("sdk_plan", {})
+        
+        # Think about whether the plan makes sense
+        review_context = f"Reviewing plan: {plan.get('intent', 'unknown')}. Operations: {len(plan.get('operations', []))} steps."
+        review_thought = await self.think(review_context)
+        
+        # Store review in state
+        state["messages"].append(
+            AIMessage(content=f"Review: {review_thought.get('decision', 'proceeding')}")
+        )
+        
+        return state
+    
+    def should_proceed_or_rethink(self, state: AgentState) -> Literal["proceed", "rethink"]:
+        """Decide whether to proceed with execution or rethink the plan"""
+        # Check if we've thought enough times
+        thinking_count = len([t for t in self.thinking_history if "review" in str(t.get("context", ""))])
+        
+        # If we've reviewed more than 2 times, proceed to avoid infinite loops
+        if thinking_count > 2:
+            logger.info("Maximum thinking iterations reached, proceeding")
+            return "proceed"
+        
+        # Check if the last review identified issues
+        if self.thinking_history and "issue" in str(self.thinking_history[-1].get("potential_issues", [])):
+            logger.info("Issues identified in review, rethinking")
+            return "rethink"
+        
+        return "proceed"
+    
+    async def verify_execution(self, state: AgentState) -> AgentState:
+        """Verify if the execution was successful"""
+        sdk_response = state.get("sdk_response", {})
+        
+        # Think about the execution results
+        if isinstance(sdk_response, dict) and "has_errors" in sdk_response:
+            verification_context = f"Execution had errors: {sdk_response.get('has_errors')}"
+        else:
+            verification_context = "Execution completed, verifying results"
+        
+        verification_thought = await self.think(verification_context)
+        
+        # Store verification in state
+        state["messages"].append(
+            AIMessage(content=f"Verification: {verification_thought.get('verification_approach', 'checking')}")
+        )
+        
+        return state
+    
+    def should_retry_or_continue(self, state: AgentState) -> Literal["retry", "continue"]:
+        """Decide whether to retry execution or continue to formatting"""
+        sdk_response = state.get("sdk_response", {})
+        
+        # Check retry count to avoid infinite loops
+        retry_count = len([m for m in state["messages"] if isinstance(m.content, str) and "retry" in m.content.lower()])
+        if retry_count >= 2:
+            logger.info("Maximum retries reached, continuing")
+            return "continue"
+        
+        # Check if there were critical errors
+        if isinstance(sdk_response, dict):
+            if sdk_response.get("has_errors") and sdk_response.get("has_errors") == True:
+                # Check if all operations failed
+                if "multi_step_results" in sdk_response:
+                    results = sdk_response["multi_step_results"]
+                    error_count = sum(1 for r in results if isinstance(r, dict) and "error" in r)
+                    if error_count == len(results):
+                        logger.info("All operations failed, retrying")
+                        return "retry"
+        
+        return "continue"
+    
     async def understand_request(self, state: AgentState) -> AgentState:
         """Understand what the user is asking for"""
         request = state["current_request"]
+        
+        # THINK FIRST: What pattern does this request follow?
+        thought = await self.think(f"User request: {request}")
+        logger.info(f"Initial thinking complete: {thought.get('pattern_recognized')}")
         
         # Use LLM to understand the request and plan SDK call
         # Get available SDK methods dynamically
@@ -98,6 +282,19 @@ AVAILABLE SDK METHODS (discovered dynamically):
 
 THINKING PATTERNS (How to approach problems):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🧠 AUTONOMOUS THINKING PRINCIPLES:
+   - Learn patterns, not specific solutions
+   - Think: "What type of problem is this?"
+   - Apply general patterns to specific cases
+   - Never rely on hardcoded strings or values
+   - Adapt your approach based on the data you receive
+   - Example thought process:
+     • "User wants to update something"
+     • "I need to find that thing first"
+     • "Then I need to update it"
+     • "Then I need to verify it worked"
+   - This pattern works for ANY update task
+
 📊 UNDERSTANDING DATA STRUCTURES:
    - Methods return data in different shapes:
      • Single item: {"id": "123", "name": "example"}
@@ -166,7 +363,7 @@ THINKING PATTERNS (How to approach problems):
    - "Update budget to $X" = user wants daily budget of X dollars
    - Pass dollar amounts directly to update methods
    - SDK methods handle dollar→cent conversion internally
-   - Example: "update Brooklyn to $200" → update_adset_budget(daily_budget=200)
+   - Example: "update [location] to $200" → update_adset_budget(daily_budget=200)
    - Never multiply by 100 yourself - SDK does this
    - EFFICIENT PATH: If updating adset in specific campaign:
      1. Find campaign → 2. Get its adsets → 3. Find target → 4. Update
@@ -174,9 +371,27 @@ THINKING PATTERNS (How to approach problems):
    - VERIFY SUCCESS: Check response has success=True before confirming
    - If update fails, report the error, don't claim success
    - After update, you may want to fetch updated values to confirm
-   - If you need to find Brooklyn adset and know it's in Ryan Castro campaign:
-     Use: get_adsets_for_campaign then filter/iterate
-     NOT: search_adsets (searches entire account)
+
+🎯 ITEM SELECTION PATTERN (Finding specific items in lists):
+   - When user mentions a specific item by name (city, campaign, adset)
+   - And you have a list of items from previous step
+   - Think: "Which item in this list matches what the user asked for?"
+   - Pattern recognition approach:
+     • Extract identifying words from user request (proper nouns, capitals)
+     • Iterate through list items
+     • Match request keywords against item names
+     • Select the matching item's ID for operations
+   - Example: User says "update Miami budget"
+     • You have list: [{name: "Tour - Miami", id: "123"}, {name: "Tour - LA", id: "456"}]
+     • Extract "Miami" from request
+     • Find item with "Miami" in name
+     • Use ID "123" for update operation
+   - This pattern works for ANY selection task:
+     • Selecting campaigns by name
+     • Finding specific adsets/cities
+     • Choosing ads to update
+   - NO HARDCODING: Never hardcode specific strings like "brooklyn" or "miami"
+   - Think generically: "How do I match user intent to available items?"
 
 📊 INSIGHTS PATTERN - DATE SELECTION:
    - Insights methods accept date_preset parameter
@@ -191,6 +406,20 @@ THINKING PATTERNS (How to approach problems):
    - When in doubt, use "maximum" to get the most complete picture
    - For city-level metrics, use get_adset_insights if available
    - Don't specify fields parameter unless needed - defaults work well
+
+🔍 CONTEXT-AWARE PATTERN MATCHING:
+   - Extract context from user requests dynamically
+   - Don't hardcode expectations about specific words
+   - Pattern: "update [SOMETHING] in [SOMEWHERE] to [VALUE]"
+     • SOMETHING = what to update (extract from request)
+     • SOMEWHERE = where to find it (extract from request)  
+     • VALUE = new value (extract from request)
+   - Apply this pattern to ANY update request
+   - Let the context determine the specifics
+   - Examples of pattern application:
+     • "update Miami budget" → SOMETHING=budget, SOMEWHERE=Miami
+     • "update campaign status" → SOMETHING=status, SOMEWHERE=campaign
+     • "update LA daily spend" → SOMETHING=daily spend, SOMEWHERE=LA
 
 🔗 MULTI-STEP THINKING:
    - Break complex requests into steps
@@ -337,17 +566,18 @@ Example - Getting metrics for each city:
     ]
 }
 
-Example - Updating budget (EFFICIENT approach):
+Example - Updating budget (EFFICIENT approach with item selection):
 {
-    "reasoning": "User wants to update Brooklyn adset budget. Use hierarchical navigation for efficiency. Get campaign, then its adsets, find Brooklyn, update.",
-    "intent": "Update Brooklyn adset budget to $200",
+    "reasoning": "User wants to update specific city's budget. Use hierarchical navigation for efficiency. Get campaign, then its adsets, select matching city, update.",
+    "intent": "Update specific adset budget to $200", 
     "operations": [
-        {"sdk_method": "search_campaigns", "parameters": {"query": "Ryan Castro"}},
+        {"sdk_method": "search_campaigns", "parameters": {"query": "campaign_name"}},
         {"sdk_method": "get_adsets_for_campaign", "parameters": {"campaign_id": "result_from_0"}, "uses_result_from": 0},
         {"sdk_method": "update_adset_budget", "parameters": {"id": "result_from_1", "daily_budget": 200}, "uses_result_from": 1}
     ]
 }
 Note: Step 2 uses get_adsets_for_campaign (efficient) not search_adsets (inefficient)
+Note: System will automatically match user's requested item from the list in step 2
 
 The "iterate_on" field tells the system:
 - Run this operation multiple times
@@ -391,9 +621,13 @@ IMPORTANT:
 - If any step fails, acknowledge it and stop
 - Don't pretend later steps succeeded when earlier ones failed"""
         
+        # Include thinking insights in the prompt
+        thinking_context = f"\nThinking insights: {thought.get('pattern_recognized', 'unknown')}\n"
+        thinking_context += f"Decision approach: {thought.get('decision', 'standard approach')}\n"
+        
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=f"User request: {request}")
+            HumanMessage(content=f"User request: {request}{thinking_context}")
         ]
         
         response = await self.llm.ainvoke(messages)
@@ -426,6 +660,7 @@ IMPORTANT:
     async def execute_sdk_call(self, state: AgentState) -> AgentState:
         """Execute the SDK call based on the plan"""
         plan = state.get("sdk_plan", {})
+        request = state.get("current_request", "")  # Get request for context
         
         # Check if we have multi-step operations
         if "operations" in plan and isinstance(plan["operations"], list):
@@ -515,15 +750,40 @@ IMPORTANT:
                     # Extract ID from previous result and substitute placeholders
                     result_id = None
                     if isinstance(prev_result, list) and len(prev_result) > 0:
-                        # For update operations, might need to find specific item
-                        if "update" in method_name.lower() and "brooklyn" in str(parameters).lower():
-                            # Find Brooklyn adset specifically
-                            brooklyn_adset = next((item for item in prev_result if "brooklyn" in item.get("name", "").lower()), None)
-                            if brooklyn_adset:
-                                result_id = brooklyn_adset.get("id")
-                                logger.info(f"Found Brooklyn adset: {brooklyn_adset.get('name')} with ID: {result_id}")
+                        # Apply thinking pattern: Find specific item mentioned in request
+                        request = state.get("current_request", "")
+                        
+                        # Pattern: When user mentions a specific item and we have a list
+                        # THINK: How to match user intent to available items?
+                        if "update" in method_name.lower() and prev_result:
+                            # Think about item selection
+                            selection_context = f"Need to select item from list. Request: {request}. Available items: {[item.get('name', '') for item in prev_result if isinstance(item, dict)]}"
+                            selection_thought = await self.think(selection_context)
+                            logger.info(f"Selection thinking: {selection_thought.get('decision')}")
+                            
+                            # Extract location/city names from request using pattern matching
+                            words = request.split()
+                            
+                            # Try to find matching item by name
+                            matched_item = None
+                            for item in prev_result:
+                                item_name = item.get("name", "").lower()
+                                # Check each word in request against item names
+                                for word in words:
+                                    if len(word) > 2 and word[0].isupper():  # Likely a proper noun
+                                        if word.lower() in item_name:
+                                            matched_item = item
+                                            logger.info(f"Found matching item: {item.get('name')} for request keyword: {word}")
+                                            break
+                                if matched_item:
+                                    break
+                            
+                            if matched_item:
+                                result_id = matched_item.get("id")
                             else:
-                                result_id = prev_result[0].get("id")  # Fallback to first
+                                # No specific match found, use first item
+                                logger.info("No specific item match found, using first item")
+                                result_id = prev_result[0].get("id")
                         else:
                             result_id = prev_result[0].get("id")
                     elif isinstance(prev_result, dict):
@@ -579,11 +839,19 @@ IMPORTANT:
             # Check if any critical errors occurred
             has_errors = any(isinstance(r, dict) and "error" in r for r in results)
             
+            # THINK: Verify the results and learn from the outcome
+            verification_context = f"Operations completed. Has errors: {has_errors}. Results summary: {len(results)} operations executed."
+            if has_errors:
+                verification_context += f" Errors found in results."
+            verification_thought = await self.think(verification_context)
+            logger.info(f"Verification thinking: {verification_thought.get('verification_approach')}")
+            
             # Combine all results
             state["sdk_response"] = {
                 "multi_step_results": results,
                 "operations": plan["operations"],
-                "has_errors": has_errors
+                "has_errors": has_errors,
+                "verification_thought": verification_thought
             }
             
             if has_errors:
@@ -740,10 +1008,12 @@ If you see errors:
 
 You MUST follow these steps EXACTLY:
 
-STEP 1: Check for errors
+STEP 1: Check for errors AND successes
   - Look for 'error' fields in the data
   - Look for 'has_errors' flag
-  - If errors exist, report them instead of continuing
+  - ALSO look for 'success': true in update operations
+  - If you see success=true, report SUCCESS not error
+  - Only report error if there's an actual error field
 
 STEP 2: Locate the data
   - Look for 'city_metrics' in the provided JSON
@@ -783,6 +1053,9 @@ Before outputting ANY number, ask yourself:
   - NEVER claim "successfully updated" unless you see success=True
   - If operation failed, say "Unable to update due to error"
   - Don't make up confirmation messages for failed operations
+  - IMPORTANT: If you see success=True in step_3_update_adset_budget, the update WORKED
+  - Look for: {"success": true, "message": "Successfully updated..."}
+  - If this exists, report SUCCESS not error!
 
 FORMATTING RULES:
 1. Clean up city names:
