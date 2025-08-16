@@ -180,29 +180,33 @@ Be creative and explore! If you're not sure, try the most logical method."""
             
             # If we got campaign search results and need insights, chain the operations
             if method_name == "search_campaigns" and isinstance(result, list) and len(result) > 0:
-                # Check if user wanted more details
-                if "spend" in request_lower or "roas" in request_lower or "performance" in request_lower:
-                    # Get insights for the found campaign
-                    campaign_id = result[0].get('id')
-                    if campaign_id:
+                campaign_id = result[0].get('id')
+                if campaign_id:
+                    # Check what user wants - can be multiple things
+                    wants_insights = "spend" in request_lower or "roas" in request_lower or "performance" in request_lower
+                    wants_cities = "city" in request_lower or "cities" in request_lower or "adset" in request_lower
+                    
+                    # Build comprehensive result
+                    combined_result = {"campaign": result[0]}
+                    
+                    if wants_insights:
                         logger.info(f"Autonomously getting insights for campaign {campaign_id}")
                         insights = self.sdk.get_campaign_insights(campaign_id, date_preset="today")
-                        # Combine results
-                        result = {
-                            "campaign": result[0],
-                            "insights": insights
-                        }
-                # Check if user asked about cities/adsets
-                elif "city" in request_lower or "cities" in request_lower or "adset" in request_lower:
-                    campaign_id = result[0].get('id')
-                    if campaign_id:
-                        logger.info(f"Autonomously getting adsets for campaign {campaign_id}")
+                        combined_result["insights"] = insights
+                    
+                    if wants_cities:
+                        logger.info(f"Autonomously getting adsets/cities for campaign {campaign_id}")
                         adsets = self.sdk.get_adsets_for_campaign(campaign_id)
-                        # Combine results
-                        result = {
-                            "campaign": result[0],
-                            "adsets": adsets
-                        }
+                        combined_result["adsets"] = adsets
+                        # Also get insights for each adset if user wants performance data
+                        if wants_insights and isinstance(adsets, list):
+                            for adset in adsets:
+                                adset_id = adset.get('id')
+                                if adset_id:
+                                    # Note: You might want to add get_adset_insights method
+                                    pass
+                    
+                    result = combined_result
             
             # Handle update operations that need search first
             elif method_name == "search_adsets" and isinstance(result, list) and len(result) > 0:
