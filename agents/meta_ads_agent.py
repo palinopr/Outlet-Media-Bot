@@ -227,6 +227,24 @@ THINKING PATTERNS (How to approach problems):
    - When formatting, extract values DIRECTLY from source
    - NEVER approximate, estimate, or round unless you have the exact source value
 
+🚨 ERROR RECOGNITION PATTERN:
+   - ALWAYS check responses for 'error' field
+   - If 'error' exists, the operation FAILED
+   - Failed operations produce NO valid data
+   - You CANNOT use data from failed operations
+   - Error in step 1 means steps 2, 3, etc. may fail too
+   - Think: "Did this actually work or did it fail?"
+   - If it failed, SAY it failed - don't pretend success
+
+🔗 DEPENDENCY THINKING:
+   - Operations depend on previous results
+   - If Step 1 fails to get campaign ID, Step 2 CANNOT update it
+   - Think: "What data does this step need?"
+   - Think: "Did the previous step provide that data?"
+   - If previous step failed, this step will likely fail
+   - Don't proceed with operations that depend on failed steps
+   - Example: Can't update budget without finding the adset first
+
 ❌ UNDERSTANDING ERRORS & RECOVERY:
    - "Field X specified more than once" = you passed wrong parameter format
      → Usually means you passed a string instead of a list
@@ -249,6 +267,15 @@ THINKING PATTERNS (How to approach problems):
    - For budget updates: response['success'] must be True
    - Only tell user "updated successfully" if verified
    - If unsure, say "Update requested" not "Update completed"
+
+⚡ FAILURE REPORTING PRINCIPLES:
+   - Be HONEST about what happened
+   - "I encountered an error" is better than fake success
+   - If Step 1 fails, report: "Unable to find campaign due to API error"
+   - Don't make up data to fill gaps from failures
+   - Users appreciate honesty about problems
+   - Explain what went wrong if you can identify it
+   - Suggest solutions or alternatives when possible
 
 META ADS HIERARCHY:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -294,6 +321,18 @@ Example - Getting metrics for each city:
     ]
 }
 
+Example - Updating budget (with error awareness):
+{
+    "reasoning": "User wants to update Brooklyn adset budget. Must find campaign first, then adset, then update",
+    "intent": "Update Brooklyn adset budget to $200",
+    "operations": [
+        {"sdk_method": "search_campaigns", "parameters": {"query": "Ryan Castro"}},
+        {"sdk_method": "search_adsets", "parameters": {"query": "Brooklyn"}},
+        {"sdk_method": "update_adset_budget", "parameters": {"id": "result_from_1", "daily_budget": 200}, "uses_result_from": 1}
+    ]
+}
+Note: If step 1 or 2 fails, step 3 cannot succeed
+
 The "iterate_on" field tells the system:
 - Run this operation multiple times
 - Once for each item from the specified result
@@ -323,7 +362,18 @@ IMPORTANT:
 - Empty response is better than hallucinated response
 - Verify everything, assume nothing
 - If data seems wrong (all zeros, huge numbers), question it
-- Your credibility depends on accuracy, not appearing helpful"""
+- Your credibility depends on accuracy, not appearing helpful
+
+🔍 UNDERSTANDING OPERATION FLOW:
+- Multi-step operations are like a chain
+- Each link depends on the previous one
+- If one link breaks, the chain is broken
+- Example flow:
+  1. Search for campaign (if fails → can't continue)
+  2. Get adsets from campaign (needs campaign ID from step 1)
+  3. Update adset budget (needs adset ID from step 2)
+- If any step fails, acknowledge it and stop
+- Don't pretend later steps succeeded when earlier ones failed"""
         
         messages = [
             SystemMessage(content=system_prompt),
@@ -371,6 +421,18 @@ IMPORTANT:
                 method_name = operation.get("sdk_method", "")
                 parameters = operation.get("parameters", {})
                 uses_result = operation.get("uses_result_from")
+                
+                # Check if previous step failed and this step depends on it
+                if uses_result is not None and uses_result < len(results):
+                    prev_result = results[uses_result]
+                    if isinstance(prev_result, dict) and "error" in prev_result:
+                        logger.error(f"Step {i+1} skipped: Step {uses_result+1} failed with error")
+                        results.append({
+                            "error": f"Cannot proceed: Step {uses_result+1} failed",
+                            "dependency_failure": True,
+                            "failed_step": uses_result + 1
+                        })
+                        continue
                 
                 # Check if this operation should iterate over results
                 iterate_on = operation.get("iterate_on")
@@ -440,10 +502,14 @@ IMPORTANT:
                         result_id = prev_result[0].get("id")
                     elif isinstance(prev_result, dict):
                         result_id = prev_result.get("id")
-                        # For update operations, check if previous step was successful
-                        if "update" in method_name.lower() and prev_result.get("error"):
+                        # Check if previous step had an error
+                        if prev_result.get("error"):
                             logger.error(f"Skipping {method_name} due to previous error: {prev_result['error']}")
-                            results.append({"error": "Skipped due to previous error", "previous_error": prev_result['error']})
+                            results.append({
+                                "error": f"Cannot execute {method_name}: Previous step failed",
+                                "previous_error": prev_result['error'],
+                                "skipped": True
+                            })
                             continue
                     
                     # Replace placeholder values with actual IDs
@@ -477,16 +543,32 @@ IMPORTANT:
                     results.append(result)
                 except Exception as e:
                     logger.error(f"Error in step {i+1}: {e}")
-                    results.append({"error": str(e)})
+                    error_result = {"error": str(e), "step_failed": i+1}
+                    results.append(error_result)
+                    
+                    # If this is a critical early step, mark that subsequent steps may fail
+                    if i == 0:  # First step is usually critical (finding the campaign/adset)
+                        logger.error(f"Critical first step failed - subsequent steps may not work")
+            
+            # Check if any critical errors occurred
+            has_errors = any(isinstance(r, dict) and "error" in r for r in results)
             
             # Combine all results
             state["sdk_response"] = {
                 "multi_step_results": results,
-                "operations": plan["operations"]
+                "operations": plan["operations"],
+                "has_errors": has_errors
             }
-            state["messages"].append(
-                AIMessage(content=f"Executed {len(results)} operations successfully")
-            )
+            
+            if has_errors:
+                error_count = sum(1 for r in results if isinstance(r, dict) and "error" in r)
+                state["messages"].append(
+                    AIMessage(content=f"Executed {len(results)} operations with {error_count} errors")
+                )
+            else:
+                state["messages"].append(
+                    AIMessage(content=f"Executed {len(results)} operations successfully")
+                )
             return state
         
         # Single operation (backward compatibility)
@@ -534,6 +616,19 @@ IMPORTANT:
         
         # Track if we have valid data for validation later
         has_valid_data = False
+        
+        # Check for errors FIRST
+        if isinstance(sdk_response, dict):
+            # Check if there are errors in the response
+            if "error" in sdk_response:
+                logger.error(f"SDK returned error: {sdk_response['error']}")
+                state["final_answer"] = f"❌ Error: {sdk_response['error'][:200]}\n\nI was unable to complete your request."
+                state["messages"].append(AIMessage(content=state["final_answer"]))
+                return state
+            
+            # Check for errors in multi-step operations
+            if "has_errors" in sdk_response and sdk_response["has_errors"]:
+                logger.warning("Multi-step operation had errors")
         
         # Check if this was a multi-step operation
         if "multi_step_results" in sdk_response:
@@ -603,29 +698,46 @@ IMPORTANT:
         # Use LLM to format the response nicely
         system_prompt = """You are formatting Meta Ads data for Discord. 
 
+🔴 ERROR HANDLING FIRST 🔴
+BEFORE formatting any data, check:
+1. Is there an 'error' field in the data?
+2. Are there 'has_errors' or failed operations?
+3. If yes, REPORT THE ERROR, don't make up success
+
+If you see errors:
+- Report what failed and why
+- Don't claim operations succeeded
+- Don't make up fake data to fill gaps
+- Be honest: "Unable to update budget due to API error"
+
 🚨 CRITICAL DATA EXTRACTION PROCESS 🚨
 
 You MUST follow these steps EXACTLY:
 
-STEP 1: Locate the data
+STEP 1: Check for errors
+  - Look for 'error' fields in the data
+  - Look for 'has_errors' flag
+  - If errors exist, report them instead of continuing
+
+STEP 2: Locate the data
   - Look for 'city_metrics' in the provided JSON
   - It should be an array of city objects
   - If not found, respond: "Unable to retrieve metrics data"
 
-STEP 2: Extract values for each city
+STEP 3: Extract values for each city
   - For each city object in city_metrics:
     - City name: city['city'] 
     - Spend: city['spend'] (use EXACTLY as provided)
     - ROAS: city['roas'] (use EXACTLY as provided)
   - If a field is missing, write "N/A" not a number
 
-STEP 3: Validation
+STEP 4: Validation
   - ONLY use numbers that appear in the source data
   - NEVER generate, estimate, or round numbers
   - If you can't find a value, DO NOT make one up
   - Better to show "Data unavailable" than fake numbers
 
-STEP 4: Format the output
+STEP 5: Format the output
   - Use the EXACT values from city_metrics
   - NEVER round or modify values
   - If spend is 388.08, write $388.08, NOT $388
@@ -640,6 +752,11 @@ Before outputting ANY number, ask yourself:
   - Did I extract this EXACT value from city_metrics?
   - Am I copying it precisely without modification?
   - If not, STOP and write "N/A" instead
+
+⚠️ OPERATION SUCCESS CHECK:
+  - NEVER claim "successfully updated" unless you see success=True
+  - If operation failed, say "Unable to update due to error"
+  - Don't make up confirmation messages for failed operations
 
 FORMATTING RULES:
 1. Clean up city names:
