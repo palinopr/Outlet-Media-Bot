@@ -10,7 +10,13 @@ from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
+from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.tracers import LangChainTracer
 from tools.meta_sdk import MetaAdsSDK
+
+# Enable tracing if configured
+if os.getenv("LANGCHAIN_TRACING_V2"):
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +27,7 @@ class AgentState(TypedDict):
     current_request: str
     sdk_response: Any
     final_answer: str
+    sdk_plan: Dict[str, Any]  # Add this field to fix the error
 
 
 class MetaAdsAgent:
@@ -179,7 +186,8 @@ Be direct and helpful."""
             "messages": [],
             "current_request": request,
             "sdk_response": None,
-            "final_answer": ""
+            "final_answer": "",
+            "sdk_plan": {}  # Initialize the sdk_plan field
         }
         
         # Run the graph

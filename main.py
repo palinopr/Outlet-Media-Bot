@@ -12,6 +12,13 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Enable LangSmith tracing
+os.environ["LANGCHAIN_TRACING_V2"] = os.getenv("LANGCHAIN_TRACING_V2", "true")
+if os.getenv("LANGCHAIN_API_KEY"):
+    os.environ["LANGCHAIN_API_KEY"] = os.getenv("LANGCHAIN_API_KEY")
+if os.getenv("LANGCHAIN_PROJECT"):
+    os.environ["LANGCHAIN_PROJECT"] = os.getenv("LANGCHAIN_PROJECT")
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -39,6 +46,12 @@ def main():
         sys.exit(1)
     
     logger.info("Starting Meta Ads Discord Bot...")
+    
+    # Log LangSmith status
+    if os.getenv("LANGCHAIN_TRACING_V2") == "true":
+        logger.info(f"✅ LangSmith tracing enabled - Project: {os.getenv('LANGCHAIN_PROJECT', 'default')}")
+    else:
+        logger.warning("⚠️ LangSmith tracing is disabled")
     
     try:
         # Run the Discord bot

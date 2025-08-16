@@ -97,7 +97,7 @@ class MetaAdsDiscordBot:
                         await message.reply(response)
                         
                 except Exception as e:
-                    logger.error(f"Agent error: {e}")
+                    logger.error(f"Agent error: {e}", exc_info=True)
                     await message.reply(
                         f"❌ Sorry, I encountered an error:\n```{str(e)[:500]}```\n"
                         "Please try rephrasing your question."
