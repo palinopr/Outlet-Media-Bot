@@ -10,8 +10,7 @@ from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
-from langchain_core.callbacks import CallbackManagerForLLMRun
-from langchain_core.tracers import LangChainTracer
+from langchain_core.tracers.context import tracing_v2_enabled
 from tools.meta_sdk import MetaAdsSDK
 
 # Enable tracing if configured
@@ -216,9 +215,13 @@ Be direct and helpful."""
             "sdk_plan": {}  # Initialize the sdk_plan field
         }
         
-        # Run the graph
+        # Run the graph with LangSmith tracing
         try:
-            result = await self.graph.ainvoke(initial_state)
+            # Use tracing context for LangSmith
+            project_name = os.getenv("LANGCHAIN_PROJECT", "OutletMediaBot")
+            with tracing_v2_enabled(project_name=project_name):
+                result = await self.graph.ainvoke(initial_state)
+                logger.info(f"LangSmith trace created for project: {project_name}")
             return result.get("final_answer", "I couldn't process your request.")
         except Exception as e:
             logger.error(f"Agent error: {e}")
