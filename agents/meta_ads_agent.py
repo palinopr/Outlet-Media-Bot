@@ -506,38 +506,56 @@ IMPORTANT:
         
         # Use LLM to format the response nicely
         system_prompt = """You are formatting Meta Ads data for Discord. 
-Create a clear, concise response using:
+
+CRITICAL RULES:
+1. **NEVER MAKE UP NUMBERS** - Only use the EXACT data provided
+2. If city_metrics is present, use those EXACT values
+3. If spend is 0.27, show $0.27, NOT $5000
+4. If ROAS is 38.84, show 38.84, NOT 3.5
+5. Present REAL data, even if values seem small
+
+Format guidelines:
 - Emojis for visual appeal
-- Bullet points for lists
+- Tables for multiple cities
 - Bold for important numbers
-- Tables if helpful (using Discord markdown)
 
-For city-level metrics (city_metrics in results):
-- Present each city's data clearly
-- Show spend in dollars (already converted)
-- Show ROAS values
-- Group by city name
-- Use a table format if multiple cities
+For city_metrics data:
+- Use the EXACT spend values (already in dollars)
+- Use the EXACT ROAS values provided
+- Show all cities in the data
+- Never invent or estimate values
 
-For multi-step results:
-- Combine the data logically
-- Focus on answering what the user asked for
-- If they asked "by city" - show city breakdown
-- Don't just show campaign totals if they wanted details
-
-For UPDATE operations:
-- Clearly confirm what was changed
-- Show old vs new values if available
-- Use ✅ for success, ❌ for errors
-- Be extra clear about monetary values (show dollars, not cents)
+Example: If data shows:
+{"city": "Brooklyn", "spend": 3.53, "roas": 28.44}
+You MUST show: Brooklyn: $3.53 (ROAS: 28.44)
+NOT: Brooklyn: $7,000 (ROAS: 5.2)
 
 Keep it under 2000 characters.
-Be direct and helpful. Answer exactly what was asked."""
+Answer exactly what was asked with REAL data only."""
+        
+        # Log the data we're about to format
+        logger.info(f"Formatting response with data keys: {sdk_response.keys() if isinstance(sdk_response, dict) else type(sdk_response)}")
+        if isinstance(sdk_response, dict) and "results" in sdk_response:
+            if "city_metrics" in sdk_response["results"]:
+                logger.info(f"City metrics found: {len(sdk_response['results']['city_metrics'])} cities")
+        
+        # Don't truncate important data - prioritize city_metrics if present
+        data_str = json.dumps(sdk_response, indent=2)
+        if len(data_str) > 8000:  # Increase limit and be smarter about truncation
+            # If we have city_metrics, prioritize showing that
+            if isinstance(sdk_response, dict) and "results" in sdk_response and "city_metrics" in sdk_response["results"]:
+                priority_data = {
+                    "request": sdk_response.get("request", ""),
+                    "city_metrics": sdk_response["results"]["city_metrics"]
+                }
+                data_str = json.dumps(priority_data, indent=2)
+            else:
+                data_str = data_str[:8000]
         
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=f"User asked: {request}"),
-            HumanMessage(content=f"Data retrieved: {json.dumps(sdk_response, indent=2)[:3000]}")
+            HumanMessage(content=f"Data retrieved: {data_str}")
         ]
         
         response = await self.llm.ainvoke(messages)
