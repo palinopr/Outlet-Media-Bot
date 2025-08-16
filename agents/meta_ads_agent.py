@@ -139,15 +139,7 @@ For single operations:
     "parameters": {...}
 }
 
-Think through the COMPLETE solution before responding.
-{{
-    "reasoning": "your thought process",
-    "intent": "what the user wants", 
-    "sdk_method": "method_name",
-    "parameters": {{...}}
-}}
-
-Be creative and explore! If you're not sure, try the most logical method."""
+Think through the COMPLETE solution before responding."""
         
         messages = [
             SystemMessage(content=system_prompt),
