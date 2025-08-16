@@ -9,7 +9,20 @@ import os
 from typing import Optional
 from agents.meta_ads_agent import MetaAdsAgent
 
-logger = logging.getLogger(__name__)
+# Check if we should use LangGraph deployment
+USE_LANGGRAPH_DEPLOYMENT = os.getenv("LANGGRAPH_DEPLOYMENT_URL") is not None
+
+if USE_LANGGRAPH_DEPLOYMENT:
+    try:
+        from langgraph_sdk import get_client
+        logger = logging.getLogger(__name__)
+        logger.info("Using LangGraph deployment mode")
+    except ImportError:
+        logger = logging.getLogger(__name__)
+        logger.warning("langgraph-sdk not installed, falling back to local mode")
+        USE_LANGGRAPH_DEPLOYMENT = False
+else:
+    logger = logging.getLogger(__name__)
 
 
 class MetaAdsDiscordBot:
@@ -20,8 +33,12 @@ class MetaAdsDiscordBot:
         if not self.token:
             raise ValueError("DISCORD_BOT_TOKEN not found")
         
-        # Initialize the Meta Ads agent
-        self.agent = MetaAdsAgent()
+        # Initialize the agent (local or remote)
+        if USE_LANGGRAPH_DEPLOYMENT:
+            self._init_remote_agent()
+        else:
+            self.agent = MetaAdsAgent()
+            self.use_remote = False
         
         # Setup Discord client
         intents = discord.Intents.default()
@@ -31,6 +48,58 @@ class MetaAdsDiscordBot:
         
         # Setup event handlers
         self.setup_events()
+    
+    def _init_remote_agent(self):
+        """Initialize connection to LangGraph deployment"""
+        deployment_url = os.getenv("LANGGRAPH_DEPLOYMENT_URL")
+        api_key = os.getenv("LANGGRAPH_API_KEY")
+        
+        if not deployment_url or not api_key:
+            logger.warning("LangGraph deployment URL or API key missing, using local agent")
+            self.agent = MetaAdsAgent()
+            self.use_remote = False
+            return
+        
+        try:
+            # Create LangGraph client
+            self.lg_client = get_client(url=deployment_url, api_key=api_key)
+            self.use_remote = True
+            self.assistant_id = "meta_ads_agent"  # The graph name from langgraph.json
+            logger.info(f"Connected to LangGraph deployment at {deployment_url}")
+        except Exception as e:
+            logger.error(f"Failed to connect to LangGraph deployment: {e}")
+            logger.info("Falling back to local agent")
+            self.agent = MetaAdsAgent()
+            self.use_remote = False
+    
+    async def process_with_remote(self, content: str) -> str:
+        """Process request using remote LangGraph deployment"""
+        try:
+            # Create a thread for this conversation
+            thread = await self.lg_client.threads.create()
+            
+            # Send the message
+            run = await self.lg_client.runs.create(
+                thread_id=thread["thread_id"],
+                assistant_id=self.assistant_id,
+                input={"current_request": content}
+            )
+            
+            # Wait for completion
+            result = await self.lg_client.runs.wait(
+                thread_id=thread["thread_id"],
+                run_id=run["run_id"]
+            )
+            
+            # Get the final answer
+            if result and "final_answer" in result:
+                return result["final_answer"]
+            else:
+                return "I received your message but couldn't generate a proper response."
+                
+        except Exception as e:
+            logger.error(f"Remote processing error: {e}")
+            return f"❌ Error connecting to remote service: {str(e)[:200]}"
     
     def setup_events(self):
         """Setup Discord event handlers"""
@@ -80,9 +149,14 @@ class MetaAdsDiscordBot:
                 
                 logger.info(f"User {message.author}: {content[:100]}")
                 
-                # Process with agent
+                # Process with agent (remote or local)
                 try:
-                    response = await self.agent.process_request(content)
+                    if self.use_remote:
+                        logger.info("Processing with remote LangGraph deployment")
+                        response = await self.process_with_remote(content)
+                    else:
+                        logger.info("Processing with local agent")
+                        response = await self.agent.process_request(content)
                     
                     # Handle long messages
                     if len(response) > 2000:
