@@ -77,29 +77,45 @@ class MetaAdsDiscordBot:
         try:
             # Create a thread for this conversation
             thread = await self.lg_client.threads.create()
+            thread_id = thread["thread_id"]
             
-            # Send the message
-            run = await self.lg_client.runs.create(
-                thread_id=thread["thread_id"],
+            # Stream the run
+            input_data = {
+                "messages": [{"role": "human", "content": content}],
+                "current_request": content
+            }
+            
+            # Use the runs.stream method to process
+            final_output = None
+            async for chunk in self.lg_client.runs.stream(
+                thread_id=thread_id,
                 assistant_id=self.assistant_id,
-                input={"current_request": content}
-            )
+                input=input_data,
+                stream_mode="values"
+            ):
+                if chunk and isinstance(chunk, dict):
+                    # Look for final_answer in the output
+                    if "final_answer" in chunk:
+                        final_output = chunk["final_answer"]
+                    # Also check in the data field
+                    elif "data" in chunk and isinstance(chunk["data"], dict):
+                        if "final_answer" in chunk["data"]:
+                            final_output = chunk["data"]["final_answer"]
             
-            # Wait for completion
-            result = await self.lg_client.runs.wait(
-                thread_id=thread["thread_id"],
-                run_id=run["run_id"]
-            )
-            
-            # Get the final answer
-            if result and "final_answer" in result:
-                return result["final_answer"]
+            if final_output:
+                return final_output
             else:
-                return "I received your message but couldn't generate a proper response."
+                # Fallback: try to get the last message from the thread
+                state = await self.lg_client.threads.get_state(thread_id)
+                if state and "values" in state and "final_answer" in state["values"]:
+                    return state["values"]["final_answer"]
+                return "I processed your request but couldn't generate a proper response."
                 
         except Exception as e:
-            logger.error(f"Remote processing error: {e}")
-            return f"❌ Error connecting to remote service: {str(e)[:200]}"
+            logger.error(f"Remote processing error: {e}", exc_info=True)
+            # Fallback to local processing
+            logger.info("Falling back to local processing")
+            return await self.agent.process_request(content)
     
     def setup_events(self):
         """Setup Discord event handlers"""
