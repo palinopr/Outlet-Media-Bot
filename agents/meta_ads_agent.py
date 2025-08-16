@@ -75,38 +75,71 @@ class MetaAdsAgent:
 
 {', '.join(sdk_methods)}
 
-To explore what these methods do:
-1. Methods starting with 'get_' retrieve data
-2. 'search_' methods find items by name/query
-3. 'update_' methods MODIFY data (be careful!)
-4. 'pause_' and 'resume_' methods control campaign/adset status
-5. 'query' is a flexible method for any operation
+METHOD SELECTION PATTERNS (How to choose the right tool):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• When user mentions a SPECIFIC NAME (like "Ryan", "Miami", "House78"):
+  → Use SEARCH methods first (search_campaigns, search_adsets)
+  → NEVER use get_all methods for specific names
+  
+• When user wants ALL items or doesn't specify:
+  → Use get_all methods (get_all_campaigns, etc.)
+  
+• When user mentions "cities" or locations:
+  → These are ADSETS in Meta Ads
+  → Use search_adsets or get_adsets_for_campaign
+  
+• For UPDATE operations:
+  → ALWAYS search first to get the ID
+  → Then update using that ID
 
-Important context about Meta Ads structure:
-- Campaigns contain Ad Sets, which contain Ads
-- Ad Sets often represent geographic targeting (cities, regions)
-- When users mention "cities", they usually mean Ad Sets
+UNDERSTANDING METHODS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• 'search_' = Find specific items by name/query
+• 'get_all_' = Retrieve everything
+• 'get_' = Get specific item by ID or get related items
+• 'update_' = Modify data (budgets, status)
+• 'pause_'/'resume_' = Control campaign/adset status
 
-CRITICAL for update operations:
-- Budget values: When users say "$500", they mean dollars. The API needs cents, so multiply by 100
-- Always search first: Before updating "Miami budget", search for the Miami adset to get its ID
-- Chain operations: search -> get ID -> update with that ID
-- Be careful with updates - they modify real campaigns!
+META ADS HIERARCHY:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Account → Campaigns → Ad Sets (cities) → Ads
 
-When a user asks to UPDATE something (like "set Miami budget to $500"):
-1. First, search for the item by name (search_adsets for "Miami")
-2. Get the ID from search results
-3. Convert dollar amounts to cents (* 100)
-4. Call the update method with the ID and converted value
+MULTI-STEP PLANNING:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+For complex requests that need multiple pieces of data:
+- Plan a SEQUENCE of operations
+- Each operation can use results from previous ones
+- Example: "Ryan's cities with spend"
+  1. search_campaigns(query="Ryan") → get campaign ID
+  2. get_adsets_for_campaign(campaign_id) → get cities
+  3. get_campaign_insights(campaign_id) → get spend/ROAS
 
-Think step by step:
-1. What is the user asking for?
-2. Is this a read or write operation?
-3. Do I need to search for something by name first?
-4. Do I need to convert units (dollars to cents)?
-5. What method(s) would accomplish this?
+IMPORTANT RULES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. SPECIFIC NAME → search, not get_all
+2. Budget values: dollars → cents (* 100)
+3. Cities = Ad Sets
+4. Plan the complete solution, not just one step
 
-Return your reasoning and plan as JSON:
+Return your plan as JSON. For multi-step operations, use an array:
+{
+    "reasoning": "your analysis",
+    "intent": "what the user wants",
+    "operations": [
+        {"sdk_method": "method1", "parameters": {...}},
+        {"sdk_method": "method2", "parameters": {...}, "uses_result_from": 0}
+    ]
+}
+
+For single operations:
+{
+    "reasoning": "your analysis",
+    "intent": "what the user wants",
+    "sdk_method": "method_name",
+    "parameters": {...}
+}
+
+Think through the COMPLETE solution before responding.
 {{
     "reasoning": "your thought process",
     "intent": "what the user wants", 
@@ -151,6 +184,63 @@ Be creative and explore! If you're not sure, try the most logical method."""
     async def execute_sdk_call(self, state: AgentState) -> AgentState:
         """Execute the SDK call based on the plan"""
         plan = state.get("sdk_plan", {})
+        
+        # Check if we have multi-step operations
+        if "operations" in plan and isinstance(plan["operations"], list):
+            # Execute multi-step plan
+            logger.info(f"Executing multi-step plan with {len(plan['operations'])} operations")
+            results = []
+            
+            for i, operation in enumerate(plan["operations"]):
+                method_name = operation.get("sdk_method", "")
+                parameters = operation.get("parameters", {})
+                uses_result = operation.get("uses_result_from")
+                
+                # If this operation uses results from a previous one
+                if uses_result is not None and uses_result < len(results):
+                    prev_result = results[uses_result]
+                    # Extract ID from previous result
+                    if isinstance(prev_result, list) and len(prev_result) > 0:
+                        if "campaign_id" not in parameters and prev_result[0].get("id"):
+                            parameters["campaign_id"] = prev_result[0]["id"]
+                        elif "adset_id" not in parameters and prev_result[0].get("id"):
+                            parameters["adset_id"] = prev_result[0]["id"]
+                    elif isinstance(prev_result, dict) and prev_result.get("id"):
+                        if "campaign_id" not in parameters:
+                            parameters["campaign_id"] = prev_result["id"]
+                
+                # Clean method name
+                if method_name.startswith("sdk."):
+                    method_name = method_name[4:]
+                
+                logger.info(f"Step {i+1}: {method_name} with params: {parameters}")
+                
+                # Execute this step
+                try:
+                    method = getattr(self.sdk, method_name, None)
+                    if not method:
+                        result = self.sdk.query(method_name, parameters)
+                    else:
+                        if parameters:
+                            result = method(**parameters)
+                        else:
+                            result = method()
+                    results.append(result)
+                except Exception as e:
+                    logger.error(f"Error in step {i+1}: {e}")
+                    results.append({"error": str(e)})
+            
+            # Combine all results
+            state["sdk_response"] = {
+                "multi_step_results": results,
+                "operations": plan["operations"]
+            }
+            state["messages"].append(
+                AIMessage(content=f"Executed {len(results)} operations successfully")
+            )
+            return state
+        
+        # Single operation (backward compatibility)
         method_name = plan.get("sdk_method", "get_all_campaigns")
         parameters = plan.get("parameters", {})
         reasoning = plan.get("reasoning", "")
@@ -245,6 +335,32 @@ Be creative and explore! If you're not sure, try the most logical method."""
         sdk_response = state.get("sdk_response", {})
         request = state["current_request"]
         
+        # Check if this was a multi-step operation
+        if "multi_step_results" in sdk_response:
+            # Format multi-step results specially
+            results = sdk_response["multi_step_results"]
+            operations = sdk_response["operations"]
+            
+            # Build a comprehensive view of the data
+            formatted_data = {
+                "request": request,
+                "steps_executed": len(operations),
+                "results": {}
+            }
+            
+            for i, (op, result) in enumerate(zip(operations, results)):
+                step_name = op.get("sdk_method", "unknown")
+                if "search" in step_name and isinstance(result, list) and len(result) > 0:
+                    formatted_data["results"]["found_item"] = result[0]
+                elif "adsets" in step_name:
+                    formatted_data["results"]["adsets"] = result
+                elif "insights" in step_name:
+                    formatted_data["results"]["insights"] = result
+                else:
+                    formatted_data["results"][f"step_{i+1}_{step_name}"] = result
+            
+            sdk_response = formatted_data
+        
         # Use LLM to format the response nicely
         system_prompt = """You are formatting Meta Ads data for Discord. 
 Create a clear, concise response using:
@@ -253,6 +369,11 @@ Create a clear, concise response using:
 - Bold for important numbers
 - Tables if helpful (using Discord markdown)
 
+For multi-step results:
+- Combine the data logically
+- If there are campaigns, adsets (cities), and insights - present them together
+- Show the complete picture the user asked for
+
 For UPDATE operations:
 - Clearly confirm what was changed
 - Show old vs new values if available
@@ -260,7 +381,7 @@ For UPDATE operations:
 - Be extra clear about monetary values (show dollars, not cents)
 
 Keep it under 2000 characters.
-Be direct and helpful."""
+Be direct and helpful. Answer exactly what was asked."""
         
         messages = [
             SystemMessage(content=system_prompt),
