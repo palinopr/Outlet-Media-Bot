@@ -10,19 +10,20 @@ from typing import Optional
 from agents.meta_ads_agent import MetaAdsAgent
 
 # Check if we should use LangGraph deployment
-USE_LANGGRAPH_DEPLOYMENT = os.getenv("LANGGRAPH_DEPLOYMENT_URL") is not None
+USE_LANGGRAPH_DEPLOYMENT = os.getenv("USE_LANGGRAPH_DEPLOYMENT", "false").lower() == "true"
 
 if USE_LANGGRAPH_DEPLOYMENT:
     try:
         from langgraph_sdk import get_client
         logger = logging.getLogger(__name__)
-        logger.info("Using LangGraph deployment mode")
+        logger.info("LangGraph deployment mode enabled")
     except ImportError:
         logger = logging.getLogger(__name__)
         logger.warning("langgraph-sdk not installed, falling back to local mode")
         USE_LANGGRAPH_DEPLOYMENT = False
 else:
     logger = logging.getLogger(__name__)
+    logger.info("Using local agent mode (no deployment)")
 
 
 class MetaAdsDiscordBot:
