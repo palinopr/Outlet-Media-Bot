@@ -135,11 +135,17 @@ THINKING PATTERNS (How to approach problems):
    - "total" or "overall" = campaign-level is enough
    - Plural + "tell me" = user wants details for ALL items
 
-📊 INSIGHTS PATTERN:
+📊 INSIGHTS PATTERN - DATE SELECTION:
    - Insights methods accept date_preset parameter
-   - Common values: "today", "yesterday", "last_7d", "last_30d", "lifetime"
-   - If user asks for recent data, use "last_7d" by default
-   - If user asks for all-time data, use "lifetime"
+   - Valid values: "today", "yesterday", "last_7d", "last_14d", "last_28d", "last_30d", "last_90d", "maximum"
+   - IMPORTANT DATE LOGIC:
+     • User doesn't specify time = use "maximum" (all available data)
+     • "recent" or "this week" = use "last_7d"
+     • "this month" = use "last_30d"
+     • "today" = use "today"
+     • "all time" or "total" = use "maximum"
+   - NEVER use "lifetime" - it's invalid and causes errors
+   - When in doubt, use "maximum" to get the most complete picture
    - For city-level metrics, use get_adset_insights if available
    - Don't specify fields parameter unless needed - defaults work well
 
@@ -228,12 +234,12 @@ If yes, use "iterate_on" to express this:
 
 Example - Getting metrics for each city:
 {
-    "reasoning": "User wants metrics BY city. Need to get insights for EACH adset",
+    "reasoning": "User wants metrics BY city. No time specified, so use maximum data. Need insights for EACH adset",
     "intent": "Get spend and ROAS for each city individually",
     "operations": [
         {"sdk_method": "search_campaigns", "parameters": {"query": "name"}},
         {"sdk_method": "get_adsets_for_campaign", "parameters": {"campaign_id": "result_from_0"}, "uses_result_from": 0},
-        {"sdk_method": "get_adset_insights", "parameters": {"date_preset": "last_7d"}, "iterate_on": "result_from_1"}
+        {"sdk_method": "get_adset_insights", "parameters": {"date_preset": "maximum"}, "iterate_on": "result_from_1"}
     ]
 }
 
@@ -507,29 +513,39 @@ IMPORTANT:
         # Use LLM to format the response nicely
         system_prompt = """You are formatting Meta Ads data for Discord. 
 
-⚠️ ABSOLUTE CRITICAL RULE ⚠️
-YOU MUST USE THE EXACT NUMBERS FROM THE DATA PROVIDED.
-DO NOT ROUND UP. DO NOT ESTIMATE. DO NOT MAKE UP NUMBERS.
+⚠️ CRITICAL: USE EXACT NUMBERS FROM city_metrics - NO ROUNDING OR ESTIMATES ⚠️
 
-If the data shows:
-- spend: 0.27 → You write: $0.27 (NOT $5000)
-- spend: 3.53 → You write: $3.53 (NOT $7000) 
-- roas: 38.84 → You write: 38.84 (NOT 3.5)
+FORMATTING RULES:
+1. Clean up city names:
+   - "Sende Tour - LA" → "**Los Angeles**" 
+   - "Sende Tour - Brooklyn" → "**Brooklyn**"
+   - "Sende Tour - Miami" → "**Miami**"
+   - "Sende Tour - Houston" → "**Houston**"
+   - "Sende Tour - Chicago" → "**Chicago**"
+   - "Sende Tour - Retargeting - exclude sales" → "**Retargeting**"
 
-LOOK FOR "city_metrics" IN THE DATA:
-This contains the REAL values you MUST use.
+2. For spend and ROAS values:
+   - Use EXACT numbers from city_metrics
+   - Format spend with 2 decimals: $X.XX
+   - Format ROAS with 1-2 decimals as appropriate
+   - If ROAS > 10, show as "**strong**" (e.g., 28.44x 💪)
+   - If ROAS < 10, just show the number
 
-Format as a table but with EXACT values from city_metrics.
-The spend values are already in dollars.
-The ROAS values are already calculated.
+3. Present as a clean list or compact format:
+   📍 **City** → Spend: $X.XX | ROAS: X.Xx
+   
+4. Add summary at bottom:
+   - Total spend: Calculate the ACTUAL sum from city_metrics data
+   - Best performing city (highest ROAS from city_metrics)
+   - IMPORTANT: Sum the exact values, don't estimate
 
-DO NOT CREATE FAKE CITIES like "Los Angeles, CA" or "Houston, TX"
-USE THE EXACT CITY NAMES from the data like "Sende Tour - LA"
+5. Use emojis sparingly for visual appeal:
+   - 🎯 for campaign name
+   - 📍 for cities
+   - 💰 for totals
+   - 🏆 for best performer
 
-If you see small numbers like $0.27, that's CORRECT. These are test campaigns.
-Small numbers are REAL. Use them EXACTLY.
-
-Keep it under 2000 characters."""
+Keep response under 1500 chars. Be concise and professional."""
         
         # Log the data we're about to format
         logger.info(f"Formatting response with data keys: {sdk_response.keys() if isinstance(sdk_response, dict) else type(sdk_response)}")
