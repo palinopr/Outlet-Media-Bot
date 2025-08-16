@@ -289,10 +289,10 @@ class MetaAdsSDK:
     def _get_all_adsets(self) -> List[Dict]:
         """Get all ad sets from the account"""
         try:
-            adsets = self.ad_account.get_ad_sets(fields=[
+            adsets = self.account.get_ad_sets(fields=[
                 'id', 'name', 'status', 'campaign_id', 'daily_budget'
             ])
-            return [self._parse_object(adset) for adset in adsets]
+            return [adset.export_all_data() for adset in adsets]
         except Exception as e:
             logger.error(f"Error getting all adsets: {e}")
             return {"error": str(e)}
@@ -300,10 +300,10 @@ class MetaAdsSDK:
     def _get_all_ads(self) -> List[Dict]:
         """Get all ads from the account"""
         try:
-            ads = self.ad_account.get_ads(fields=[
+            ads = self.account.get_ads(fields=[
                 'id', 'name', 'status', 'adset_id', 'creative'
             ])
-            return [self._parse_object(ad) for ad in ads]
+            return [ad.export_all_data() for ad in ads]
         except Exception as e:
             logger.error(f"Error getting all ads: {e}")
             return {"error": str(e)}
@@ -311,10 +311,10 @@ class MetaAdsSDK:
     def _get_audiences(self) -> List[Dict]:
         """Get custom audiences"""
         try:
-            audiences = self.ad_account.get_custom_audiences(fields=[
+            audiences = self.account.get_custom_audiences(fields=[
                 'id', 'name', 'description', 'approximate_count'
             ])
-            return [self._parse_object(audience) for audience in audiences]
+            return [audience.export_all_data() for audience in audiences]
         except Exception as e:
             logger.error(f"Error getting audiences: {e}")
             return {"error": str(e)}
@@ -322,10 +322,10 @@ class MetaAdsSDK:
     def _get_creatives(self) -> List[Dict]:
         """Get ad creatives"""
         try:
-            creatives = self.ad_account.get_ad_creatives(fields=[
+            creatives = self.account.get_ad_creatives(fields=[
                 'id', 'name', 'title', 'body'
             ])
-            return [self._parse_object(creative) for creative in creatives]
+            return [creative.export_all_data() for creative in creatives]
         except Exception as e:
             logger.error(f"Error getting creatives: {e}")
             return {"error": str(e)}

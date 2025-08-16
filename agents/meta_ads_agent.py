@@ -132,6 +132,14 @@ THINKING PATTERNS (How to approach problems):
    - Learn from patterns: consistent small values = likely unit issue
    - Monetary fields like 'spend' often need unit awareness
 
+🔧 UNDERSTANDING SDK METHOD PATTERNS:
+   - Read method docstrings - they explain parameter expectations
+   - Update methods often say "values in dollars" - pass dollars directly
+   - SDK handles conversions internally - don't double-convert
+   - Example: update_adset_budget expects dollars, converts to cents internally
+   - When updating budget to $200, pass 200, NOT 20000
+   - Trust the SDK to handle unit conversions
+
 🎯 UNDERSTANDING USER INTENT:
    - "cities" = adsets in Meta Ads
    - "spend/ROAS/performance" = insights data
@@ -142,6 +150,14 @@ THINKING PATTERNS (How to approach problems):
    - "for each city" = iterate through adsets
    - "total" or "overall" = campaign-level is enough
    - Plural + "tell me" = user wants details for ALL items
+
+💰 BUDGET UPDATE PATTERNS:
+   - "Update budget to $X" = user wants daily budget of X dollars
+   - Pass dollar amounts directly to update methods
+   - SDK methods handle dollar→cent conversion internally
+   - Example: "update Brooklyn to $200" → update_adset_budget(daily_budget=200)
+   - Never multiply by 100 yourself - SDK does this
+   - To find specific adset: search or get campaign's adsets then filter
 
 📊 INSIGHTS PATTERN - DATE SELECTION:
    - Insights methods accept date_preset parameter
@@ -198,13 +214,18 @@ THINKING PATTERNS (How to approach problems):
    - Try "lifetime" for all-time data
    - Explain to user what you tried
 
-❌ UNDERSTANDING ERRORS:
+❌ UNDERSTANDING ERRORS & RECOVERY:
    - "Field X specified more than once" = you passed wrong parameter format
      → Usually means you passed a string instead of a list
    - "Invalid field" = field name doesn't exist
      → Check available fields or omit the parameter
    - Empty results = no data for that time period
      → Try different date_preset or explain no activity
+   - "object has no attribute" = method doesn't exist or bug
+     → Try alternative approach: parent->children pattern
+   - When search fails, think of hierarchical alternatives:
+     → Can't search adsets? Get campaign first, then its adsets
+     → Can't find by name? Get all and filter
    - Learn from errors and adjust your approach
 
 META ADS HIERARCHY:
