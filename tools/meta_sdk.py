@@ -227,6 +227,58 @@ class MetaAdsSDK:
             logger.error(f"Error getting ads: {e}")
             return {"error": str(e)}
     
+    def get_adset_insights(
+        self,
+        adset_id: str = None,
+        id: str = None,
+        date_preset: str = "last_7d",
+        fields: List[str] = None
+    ) -> Dict:
+        """Get insights for a specific adset (city)
+        
+        Args:
+            adset_id/id: The adset identifier
+            date_preset: Date range (today, yesterday, last_7d, last_30d, lifetime)
+            fields: Metrics to retrieve
+        """
+        try:
+            actual_adset_id = adset_id or id
+            if not actual_adset_id:
+                return {"error": "Please provide adset_id or id"}
+            
+            if not fields:
+                fields = [
+                    'adset_name', 'impressions', 'clicks', 'spend',
+                    'ctr', 'cpc', 'cpm', 'conversions', 'purchase_roas',
+                    'actions', 'action_values', 'cost_per_action_type'
+                ]
+            
+            adset = AdSet(actual_adset_id)
+            insights = adset.get_insights(
+                fields=fields,
+                params={'date_preset': date_preset}
+            )
+            
+            if insights:
+                data = insights[0].export_all_data()
+                # Extract ROAS if available
+                if 'purchase_roas' in data and data['purchase_roas']:
+                    # purchase_roas is an array with value
+                    if isinstance(data['purchase_roas'], list) and len(data['purchase_roas']) > 0:
+                        data['roas'] = float(data['purchase_roas'][0].get('value', 0))
+                # Convert spend from cents to dollars
+                if 'spend' in data:
+                    data['spend_dollars'] = float(data['spend']) / 100 if data['spend'] else 0
+                return data
+            return {"message": f"No insights data available for {date_preset}"}
+            
+        except FacebookRequestError as e:
+            logger.error(f"Facebook API error: {e}")
+            return {"error": str(e)}
+        except Exception as e:
+            logger.error(f"Error getting adset insights: {e}")
+            return {"error": str(e)}
+    
     def _get_all_adsets(self) -> List[Dict]:
         """Get all ad sets from the account"""
         try:

@@ -72,95 +72,117 @@ class MetaAdsAgent:
         # Get available SDK methods dynamically
         sdk_methods = [method for method in dir(self.sdk) if not method.startswith('_')]
         
+        # Get actual method signatures dynamically using introspection
+        import inspect
+        method_signatures = []
+        for method_name in sdk_methods:
+            if hasattr(self.sdk, method_name):
+                method = getattr(self.sdk, method_name)
+                if callable(method):
+                    sig = inspect.signature(method)
+                    params = []
+                    for param_name, param in sig.parameters.items():
+                        if param_name != 'self':
+                            if param.default != inspect.Parameter.empty:
+                                params.append(f"{param_name}={repr(param.default)}")
+                            else:
+                                params.append(param_name)
+                    method_signatures.append(f"• {method_name}({', '.join(params)})")
+        
         # Build the system prompt without f-string for the JSON examples
-        system_prompt = """You are an intelligent Meta Ads assistant. You have access to an SDK with these methods:
+        system_prompt = """You are an intelligent Meta Ads assistant. 
 
-""" + ', '.join(sdk_methods) + """
-
-METHOD SIGNATURES (exact parameters each method accepts):
+AVAILABLE SDK METHODS (discovered dynamically):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• search_campaigns(query: str) - Search by campaign name
-• get_all_campaigns() - Get all campaigns
-• get_campaigns_by_status(status: List[str]) - Filter by status
-• get_campaign_insights(campaign_id: str, date_preset: str = "today") - Get campaign metrics
-• get_adsets_for_campaign(campaign_id: str) - Get adsets/cities for a campaign
-• search_adsets(query: str) - Search adsets by name
-• get_ads_for_adset(adset_id: str) - Get ads in an adset
-• update_campaign_budget(campaign_id: str, daily_budget: float) - Update campaign budget
-• update_adset_budget(adset_id: str, daily_budget: float) - Update adset budget
-• pause_campaign(campaign_id: str) - Pause a campaign
-• resume_campaign(campaign_id: str) - Resume a campaign
-• pause_adset(adset_id: str) - Pause an adset
-• resume_adset(adset_id: str) - Resume an adset
-• get_performance_metrics(date_preset: str = "today") - Get account metrics
+""" + '\n'.join(method_signatures) + """
 
-METHOD SELECTION PATTERNS (How to choose the right tool):
+THINKING PATTERNS (How to approach problems):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• When user mentions a SPECIFIC NAME (like "Ryan", "Miami", "House78"):
-  → Use SEARCH methods first (search_campaigns, search_adsets)
-  → NEVER use get_all methods for specific names
-  
-• When user wants ALL items or doesn't specify:
-  → Use get_all methods (get_all_campaigns, etc.)
-  
-• When user mentions "cities" or locations:
-  → These are ADSETS in Meta Ads
-  → Use search_adsets or get_adsets_for_campaign
-  
-• For UPDATE operations:
-  → ALWAYS search first to get the ID
-  → Then update using that ID
+🔍 DISCOVERY PATTERN:
+   - Look at method names to understand their purpose
+   - Methods starting with 'search_' find specific items
+   - Methods starting with 'get_' retrieve data
+   - Methods with 'insights' return metrics (spend, ROAS, clicks)
+   - Methods with 'adset' work with cities/locations
 
-UNDERSTANDING METHODS:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• 'search_' = Find specific items by name/query
-• 'get_all_' = Retrieve everything
-• 'get_' = Get specific item by ID or get related items
-• 'update_' = Modify data (budgets, status)
-• 'pause_'/'resume_' = Control campaign/adset status
+🎯 UNDERSTANDING USER INTENT:
+   - "cities" = adsets in Meta Ads
+   - "spend/ROAS/performance" = insights data
+   - "active/paused" = status filtering
+   - When user asks for specific names, use search methods
+   - When user asks for metrics, use insights methods
+
+📊 INSIGHTS PATTERN:
+   - Insights methods accept date_preset parameter
+   - Common values: "today", "yesterday", "last_7d", "last_30d", "lifetime"
+   - If user asks for recent data, use "last_7d" by default
+   - If user asks for all-time data, use "lifetime"
+   - For city-level metrics, use get_adset_insights if available
+
+🔗 MULTI-STEP THINKING:
+   - Break complex requests into steps
+   - Each step gets you closer to the answer
+   - Use results from one step in the next (result_from_X)
+   - Think about what data you need and which methods provide it
+
+🧠 PROBLEM SOLVING APPROACH:
+   1. Understand what the user is asking for
+   2. Identify which data points you need
+   3. Find methods that provide that data
+   4. Plan the sequence of calls
+   5. Handle results intelligently
+
+💡 WHEN USER ASKS FOR METRICS BY CITY:
+   - Cities are adsets
+   - Look for methods with 'adset' and 'insights'
+   - get_adset_insights can get metrics per city
+   - Plan: search campaign → get adsets → get insights for each
+
+🔄 HANDLING EMPTY RESULTS:
+   - If insights return empty, try different date_preset
+   - Start with "last_7d" for recent data
+   - Try "lifetime" for all-time data
+   - Explain to user what you tried
 
 META ADS HIERARCHY:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Account → Campaigns → Ad Sets (cities) → Ads
+Account → Campaigns → Ad Sets (cities/audiences) → Ads
 
-MULTI-STEP PLANNING:
+Navigate this hierarchy to get detailed data!
+
+PLANNING YOUR RESPONSE:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-For complex requests that need multiple pieces of data:
-- Plan a SEQUENCE of operations
-- Each operation can use results from previous ones
-- Use "result_from_X" as placeholder for IDs from step X
-- Example: "Ryan's cities with spend"
-  1. search_campaigns(query="Ryan") → returns campaign with ID
-  2. get_adsets_for_campaign(campaign_id="result_from_0") → get cities
-  3. get_campaign_insights(campaign_id="result_from_0") → get spend/ROAS
+Think through the problem step by step:
+1. What data does the user want?
+2. Which methods can provide that data?
+3. Do I need multiple steps to get all the data?
+4. What parameters should I use?
 
-IMPORTANT RULES:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. SPECIFIC NAME → search, not get_all
-2. Budget values: dollars → cents (* 100)
-3. Cities = Ad Sets
-4. Plan the complete solution, not just one step
+Return your plan as JSON:
 
-Return your plan as JSON. For multi-step operations, use an array:
+For multi-step operations:
 {
-    "reasoning": "your analysis",
-    "intent": "what the user wants",
+    "reasoning": "explain your thinking process",
+    "intent": "what you understood the user wants",
     "operations": [
-        {"sdk_method": "search_campaigns", "parameters": {"query": "Ryan"}},
-        {"sdk_method": "get_adsets_for_campaign", "parameters": {"campaign_id": "result_from_0"}, "uses_result_from": 0},
-        {"sdk_method": "get_campaign_insights", "parameters": {"campaign_id": "result_from_0"}, "uses_result_from": 0}
+        {"sdk_method": "method1", "parameters": {"param": "value"}},
+        {"sdk_method": "method2", "parameters": {"id": "result_from_0"}, "uses_result_from": 0}
     ]
 }
 
 For single operations:
 {
-    "reasoning": "your analysis",
-    "intent": "what the user wants",
+    "reasoning": "explain your thinking",
+    "intent": "what you understood",
     "sdk_method": "method_name",
-    "parameters": {}
+    "parameters": {"param": "value"}
 }
 
-Think through the COMPLETE solution before responding."""
+IMPORTANT: 
+- Use "result_from_X" when you need an ID from step X
+- Choose date_preset based on user's request (recent = last_7d, all = lifetime)
+- If user wants city metrics, plan to get insights for each adset
+- Think autonomously - figure out the best approach!"""
         
         messages = [
             SystemMessage(content=system_prompt),
@@ -282,58 +304,6 @@ Think through the COMPLETE solution before responding."""
                     result = method(**parameters)
                 else:
                     result = method()
-            
-            # Handle intelligent chaining for different operations
-            request_lower = state["current_request"].lower()
-            
-            # If we got campaign search results and need insights, chain the operations
-            if method_name == "search_campaigns" and isinstance(result, list) and len(result) > 0:
-                campaign_id = result[0].get('id')
-                if campaign_id:
-                    # Check what user wants - can be multiple things
-                    wants_insights = "spend" in request_lower or "roas" in request_lower or "performance" in request_lower
-                    wants_cities = "city" in request_lower or "cities" in request_lower or "adset" in request_lower
-                    
-                    # Build comprehensive result
-                    combined_result = {"campaign": result[0]}
-                    
-                    if wants_insights:
-                        logger.info(f"Autonomously getting insights for campaign {campaign_id}")
-                        insights = self.sdk.get_campaign_insights(campaign_id, date_preset="today")
-                        combined_result["insights"] = insights
-                    
-                    if wants_cities:
-                        logger.info(f"Autonomously getting adsets/cities for campaign {campaign_id}")
-                        adsets = self.sdk.get_adsets_for_campaign(campaign_id)
-                        combined_result["adsets"] = adsets
-                        # Also get insights for each adset if user wants performance data
-                        if wants_insights and isinstance(adsets, list):
-                            for adset in adsets:
-                                adset_id = adset.get('id')
-                                if adset_id:
-                                    # Note: You might want to add get_adset_insights method
-                                    pass
-                    
-                    result = combined_result
-            
-            # Handle update operations that need search first
-            elif method_name == "search_adsets" and isinstance(result, list) and len(result) > 0:
-                # Check if user wants to update budget
-                if "budget" in request_lower or "update" in request_lower or "set" in request_lower or "change" in request_lower:
-                    adset_id = result[0].get('id')
-                    if adset_id:
-                        # Extract budget amount from request
-                        import re
-                        budget_match = re.search(r'\$?(\d+(?:,\d{3})*(?:\.\d{2})?)', state["current_request"])
-                        if budget_match:
-                            budget_amount = float(budget_match.group(1).replace(',', ''))
-                            logger.info(f"Autonomously updating adset {adset_id} budget to ${budget_amount}")
-                            update_result = self.sdk.update_adset_budget(adset_id, daily_budget=budget_amount)
-                            # Combine results
-                            result = {
-                                "adset_found": result[0],
-                                "update_result": update_result
-                            }
             
             state["sdk_response"] = result
             state["messages"].append(
