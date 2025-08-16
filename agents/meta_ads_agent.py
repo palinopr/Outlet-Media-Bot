@@ -77,6 +77,23 @@ class MetaAdsAgent:
 
 """ + ', '.join(sdk_methods) + """
 
+METHOD SIGNATURES (exact parameters each method accepts):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• search_campaigns(query: str) - Search by campaign name
+• get_all_campaigns() - Get all campaigns
+• get_campaigns_by_status(status: List[str]) - Filter by status
+• get_campaign_insights(campaign_id: str, date_preset: str = "today") - Get campaign metrics
+• get_adsets_for_campaign(campaign_id: str) - Get adsets/cities for a campaign
+• search_adsets(query: str) - Search adsets by name
+• get_ads_for_adset(adset_id: str) - Get ads in an adset
+• update_campaign_budget(campaign_id: str, daily_budget: float) - Update campaign budget
+• update_adset_budget(adset_id: str, daily_budget: float) - Update adset budget
+• pause_campaign(campaign_id: str) - Pause a campaign
+• resume_campaign(campaign_id: str) - Resume a campaign
+• pause_adset(adset_id: str) - Pause an adset
+• resume_adset(adset_id: str) - Resume an adset
+• get_performance_metrics(date_preset: str = "today") - Get account metrics
+
 METHOD SELECTION PATTERNS (How to choose the right tool):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 • When user mentions a SPECIFIC NAME (like "Ryan", "Miami", "House78"):
@@ -111,10 +128,11 @@ MULTI-STEP PLANNING:
 For complex requests that need multiple pieces of data:
 - Plan a SEQUENCE of operations
 - Each operation can use results from previous ones
+- Use "result_from_X" as placeholder for IDs from step X
 - Example: "Ryan's cities with spend"
-  1. search_campaigns(query="Ryan") → get campaign ID
-  2. get_adsets_for_campaign(campaign_id) → get cities
-  3. get_campaign_insights(campaign_id) → get spend/ROAS
+  1. search_campaigns(query="Ryan") → returns campaign with ID
+  2. get_adsets_for_campaign(campaign_id="result_from_0") → get cities
+  3. get_campaign_insights(campaign_id="result_from_0") → get spend/ROAS
 
 IMPORTANT RULES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -128,8 +146,9 @@ Return your plan as JSON. For multi-step operations, use an array:
     "reasoning": "your analysis",
     "intent": "what the user wants",
     "operations": [
-        {"sdk_method": "method1", "parameters": {}},
-        {"sdk_method": "method2", "parameters": {}, "uses_result_from": 0}
+        {"sdk_method": "search_campaigns", "parameters": {"query": "Ryan"}},
+        {"sdk_method": "get_adsets_for_campaign", "parameters": {"campaign_id": "result_from_0"}, "uses_result_from": 0},
+        {"sdk_method": "get_campaign_insights", "parameters": {"campaign_id": "result_from_0"}, "uses_result_from": 0}
     ]
 }
 
@@ -193,15 +212,20 @@ Think through the COMPLETE solution before responding."""
                 # If this operation uses results from a previous one
                 if uses_result is not None and uses_result < len(results):
                     prev_result = results[uses_result]
-                    # Extract ID from previous result
+                    # Extract ID from previous result and substitute placeholders
+                    result_id = None
                     if isinstance(prev_result, list) and len(prev_result) > 0:
-                        if "campaign_id" not in parameters and prev_result[0].get("id"):
-                            parameters["campaign_id"] = prev_result[0]["id"]
-                        elif "adset_id" not in parameters and prev_result[0].get("id"):
-                            parameters["adset_id"] = prev_result[0]["id"]
-                    elif isinstance(prev_result, dict) and prev_result.get("id"):
-                        if "campaign_id" not in parameters:
-                            parameters["campaign_id"] = prev_result["id"]
+                        result_id = prev_result[0].get("id")
+                    elif isinstance(prev_result, dict):
+                        result_id = prev_result.get("id")
+                    
+                    # Replace placeholder values with actual IDs
+                    if result_id:
+                        for param_key, param_value in list(parameters.items()):
+                            # If parameter value is a placeholder like "result_from_0", replace it
+                            if isinstance(param_value, str) and param_value.startswith("result_from_"):
+                                parameters[param_key] = result_id
+                                logger.info(f"Replaced {param_key}={param_value} with actual ID: {result_id}")
                 
                 # Clean method name
                 if method_name.startswith("sdk."):
