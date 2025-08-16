@@ -124,6 +124,14 @@ THINKING PATTERNS (How to approach problems):
    - When in doubt, omit optional parameters and use defaults
    - Look at parameter names for hints: 'fields' = list, 'query' = string
 
+💡 UNDERSTANDING API DATA PATTERNS:
+   - APIs may return monetary values in different units
+   - Meta API: READ operations return dollars, WRITE operations expect cents
+   - Always validate data magnitude: $0.27 for active campaign? Probably wrong
+   - If values seem 100x too small/large, check unit conversion
+   - Learn from patterns: consistent small values = likely unit issue
+   - Monetary fields like 'spend' often need unit awareness
+
 🎯 UNDERSTANDING USER INTENT:
    - "cities" = adsets in Meta Ads
    - "spend/ROAS/performance" = insights data
@@ -490,7 +498,10 @@ IMPORTANT:
                         for item_result in result:
                             if isinstance(item_result, dict) and "_for_item" in item_result:
                                 city_name = item_result["_for_item"].get("name", "Unknown")
-                                spend = item_result.get("spend_dollars", item_result.get("spend", 0))
+                                # Get spend - already in dollars from API
+                                spend = item_result.get("spend_dollars", 0)
+                                if not spend and "spend" in item_result:
+                                    spend = float(item_result["spend"]) if item_result["spend"] else 0
                                 roas = item_result.get("roas", 0)
                                 formatted_data["results"]["city_metrics"].append({
                                     "city": city_name,
@@ -526,10 +537,13 @@ FORMATTING RULES:
 
 2. For spend and ROAS values:
    - Use EXACT numbers from city_metrics
-   - Format spend with 2 decimals: $X.XX
-   - Format ROAS with 1-2 decimals as appropriate
-   - If ROAS > 10, show as "**strong**" (e.g., 28.44x 💪)
-   - If ROAS < 10, just show the number
+   - Format spend appropriately:
+     • Under $100: show 2 decimals ($52.91)
+     • Over $100: show as whole dollars ($385)
+     • Never show cents for amounts over $100
+   - Format ROAS with 1-2 decimals
+   - If ROAS > 20, add 💪 emoji
+   - Values are already in dollars, no conversion needed
 
 3. Present as a clean list or compact format:
    📍 **City** → Spend: $X.XX | ROAS: X.Xx

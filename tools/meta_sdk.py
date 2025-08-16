@@ -88,7 +88,10 @@ class MetaAdsSDK:
         date_preset: str = "today",
         fields: List[str] = None
     ) -> Dict:
-        """Get insights for a specific campaign"""
+        """Get insights for a specific campaign
+        
+        Note: Meta API returns monetary values in DOLLARS as strings.
+        """
         try:
             # Accept both 'campaign_id' and 'id' parameters
             actual_campaign_id = campaign_id or id
@@ -108,7 +111,11 @@ class MetaAdsSDK:
             )
             
             if insights:
-                return insights[0].export_all_data()
+                data = insights[0].export_all_data()
+                # Add spend_dollars for consistency (already in dollars)
+                if 'spend' in data:
+                    data['spend_dollars'] = float(data['spend']) if data['spend'] else 0
+                return data
             return {"message": "No insights data available"}
             
         except FacebookRequestError as e:
@@ -266,9 +273,9 @@ class MetaAdsSDK:
                     # purchase_roas is an array with value
                     if isinstance(data['purchase_roas'], list) and len(data['purchase_roas']) > 0:
                         data['roas'] = float(data['purchase_roas'][0].get('value', 0))
-                # Convert spend from cents to dollars
+                # Meta API returns spend in dollars as a string
                 if 'spend' in data:
-                    data['spend_dollars'] = float(data['spend']) / 100 if data['spend'] else 0
+                    data['spend_dollars'] = float(data['spend']) if data['spend'] else 0
                 return data
             return {"message": f"No insights data available for {date_preset}"}
             
@@ -370,6 +377,9 @@ class MetaAdsSDK:
             adset_id/id: The adset identifier
             daily_budget/budget: Daily budget in dollars
             lifetime_budget: Lifetime budget in dollars
+            
+        Note: Meta API expects budget values in CENTS for updates,
+        but returns them in DOLLARS for reads.
         """
         try:
             actual_id = adset_id or id
