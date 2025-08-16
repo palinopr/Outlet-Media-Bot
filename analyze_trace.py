@@ -6,7 +6,7 @@ import re
 import sys
 
 # Get trace ID from command line or use default
-trace_id = sys.argv[1] if len(sys.argv) > 1 else '8062f991-afee-44d4-99e3-43fe27f27ab1'
+trace_id = sys.argv[1] if len(sys.argv) > 1 else 'e644da71-7dff-41be-865b-9a850d2f85c5'
 
 # Load from .env file
 with open('.env', 'r') as f:

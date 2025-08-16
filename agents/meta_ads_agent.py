@@ -245,6 +245,51 @@ Think through this and return your reasoning as JSON:
         
         return "continue"
     
+    async def recognize_operation_pattern(self, sdk_response: Dict[str, Any]) -> str:
+        """
+        AUTONOMOUS PATTERN RECOGNITION - Recognizes operation type from response
+        No hardcoded field checks - pure pattern recognition
+        """
+        # Analyze operations if present - check LAST operation as it determines the type
+        if "operations" in sdk_response:
+            operations = sdk_response["operations"]
+            
+            # Look for patterns in operation names - use word boundaries
+            # Check for common prefixes/patterns in Meta SDK method names
+            update_patterns = ["update_", "set_", "modify_", "change_", "edit_"]
+            query_patterns = ["get_", "search_", "fetch_", "list_", "retrieve_", "_insights", "_metrics"]
+            
+            # Check the LAST operation, as it determines the overall type
+            if operations:
+                last_op = operations[-1]
+                method_name = last_op.get("sdk_method", "").lower()
+                
+                # Check for QUERY patterns FIRST (more specific)
+                if any(pattern in method_name for pattern in query_patterns):
+                    return "QUERY"
+                
+                # Check for UPDATE patterns after QUERY
+                if any(pattern in method_name for pattern in update_patterns):
+                    return "UPDATE"
+        
+        # Analyze results structure if no operations
+        if "multi_step_results" in sdk_response:
+            results = sdk_response["multi_step_results"]
+            
+            # Look for success/error patterns (typical of UPDATE operations)
+            for result in results:
+                if isinstance(result, dict):
+                    if "success" in result or "updated" in result:
+                        return "UPDATE"
+                    if "error" in result:
+                        return "ERROR"
+            
+            # If we have arrays of data, likely a QUERY
+            if any(isinstance(r, list) for r in results):
+                return "QUERY"
+        
+        return "UNKNOWN"
+    
     async def understand_request(self, state: AgentState) -> AgentState:
         """Understand what the user is asking for"""
         request = state["current_request"]
@@ -904,12 +949,16 @@ IMPORTANT:
         return state
     
     async def format_response(self, state: AgentState) -> AgentState:
-        """Format the SDK response for Discord"""
+        """Format the SDK response for Discord using AUTONOMOUS PATTERN RECOGNITION"""
         sdk_response = state.get("sdk_response", {})
         request = state["current_request"]
         
-        # Track if we have valid data for validation later
-        has_valid_data = False
+        # AUTONOMOUS THINKING: Analyze what type of operation was performed
+        # No hardcoded field checks - recognize patterns instead
+        
+        # First, think about what patterns we see
+        operation_pattern = await self.recognize_operation_pattern(sdk_response)
+        logger.info(f"Recognized operation pattern: {operation_pattern}")
         
         # Check for errors FIRST
         if isinstance(sdk_response, dict):
@@ -926,71 +975,72 @@ IMPORTANT:
         
         # Check if this was a multi-step operation
         if "multi_step_results" in sdk_response:
-            # Format multi-step results specially
+            # Format multi-step results using PATTERN RECOGNITION
             results = sdk_response["multi_step_results"]
             operations = sdk_response["operations"]
             
-            # Build a comprehensive view of the data
+            # Build a view of the data WITHOUT hardcoded field names
             formatted_data = {
                 "request": request,
                 "steps_executed": len(operations),
+                "operation_pattern": operation_pattern,
                 "results": {}
             }
             
             for i, (op, result) in enumerate(zip(operations, results)):
                 step_name = op.get("sdk_method", "unknown")
                 
-                # Check if this was an iterated operation
+                # PATTERN RECOGNITION: Identify data structures by their patterns
                 if op.get("iterate_on") and isinstance(result, list):
-                    # This is an array of results from iteration
-                    formatted_data["results"][f"{step_name}_per_item"] = result
-                    # If these are insights, also create a summary
-                    if "insights" in step_name:
-                        formatted_data["results"]["city_metrics"] = []
+                    # Pattern: Array of results from iteration
+                    formatted_data["results"][f"step_{i+1}_results"] = result
+                    # If these look like metrics (have numeric fields), process them
+                    if result and isinstance(result[0], dict) and any(isinstance(v, (int, float)) for v in result[0].values()):
+                        formatted_data["results"]["data_items"] = []
                         for item_result in result:
-                            if isinstance(item_result, dict) and "_for_item" in item_result:
-                                city_name = item_result["_for_item"].get("name", "Unknown")
-                                # Get spend - already in dollars from API
-                                spend = item_result.get("spend_dollars", 0)
-                                if not spend and "spend" in item_result:
-                                    spend = float(item_result["spend"]) if item_result["spend"] else 0
+                            if isinstance(item_result, dict):
+                                # PATTERN: Extract data based on structure, not field names
+                                item_data = {}
                                 
-                                # Extract ROAS correctly
-                                roas = item_result.get("roas", 0)
-                                if not roas and "purchase_roas" in item_result:
-                                    purchase_roas = item_result["purchase_roas"]
-                                    if isinstance(purchase_roas, list) and len(purchase_roas) > 0:
-                                        roas = float(purchase_roas[0].get("value", 0))
+                                # Look for name-like fields (patterns, not hardcoded)
+                                for key, value in item_result.items():
+                                    if "name" in key.lower() or key == "_for_item":
+                                        if isinstance(value, dict) and "name" in value:
+                                            item_data["identifier"] = value["name"]
+                                        elif isinstance(value, str):
+                                            item_data["identifier"] = value
                                 
-                                formatted_data["results"]["city_metrics"].append({
-                                    "city": city_name,
-                                    "spend": spend,
-                                    "roas": roas,
-                                    "impressions": item_result.get("impressions", 0),
-                                    "clicks": item_result.get("clicks", 0)
-                                })
+                                # Look for numeric metrics (patterns, not specific fields)
+                                for key, value in item_result.items():
+                                    if isinstance(value, (int, float)):
+                                        item_data[key] = value
+                                    elif isinstance(value, list) and value and isinstance(value[0], dict):
+                                        # Pattern: Array of metric objects
+                                        if "value" in value[0]:
+                                            item_data[key] = float(value[0].get("value", 0))
+                                
+                                if item_data:
+                                    formatted_data["results"]["data_items"].append(item_data)
                         
-                        # Log what we built
-                        logger.info(f"Built city_metrics with {len(formatted_data['results']['city_metrics'])} cities")
-                        for city in formatted_data["results"]["city_metrics"]:
-                            logger.info(f"  - {city['city']}: ${city['spend']:.2f} (ROAS: {city['roas']:.2f})")
-                elif "search" in step_name and isinstance(result, list) and len(result) > 0:
-                    formatted_data["results"]["found_item"] = result[0]
-                elif "adsets" in step_name:
-                    formatted_data["results"]["adsets"] = result
-                elif "insights" in step_name:
-                    formatted_data["results"]["insights"] = result
+                        # Log what we found using patterns
+                        logger.info(f"Found {len(formatted_data['results'].get('data_items', []))} data items through pattern recognition")
+                elif isinstance(result, list) and len(result) > 0:
+                    # Pattern: List of results
+                    formatted_data["results"][f"step_{i+1}_results"] = result
+                elif isinstance(result, dict):
+                    # Pattern: Single result object
+                    formatted_data["results"][f"step_{i+1}_result"] = result
                 else:
-                    formatted_data["results"][f"step_{i+1}_{step_name}"] = result
+                    # Store whatever we got
+                    formatted_data["results"][f"step_{i+1}_output"] = result
             
             sdk_response = formatted_data
-            # Log that we built city_metrics
-            if "city_metrics" in formatted_data.get("results", {}):
-                has_valid_data = True
-                logger.info(f"✅ Successfully built city_metrics with {len(formatted_data['results']['city_metrics'])} cities")
+            # Log what patterns we recognized
+            logger.info(f"✅ Processed response using {operation_pattern} pattern recognition")
         
-        # Use LLM to format the response nicely
-        system_prompt = """You are formatting Meta Ads data for Discord. 
+        # BUILD DYNAMIC PROMPT based on recognized pattern - NO HARDCODED FIELDS
+        if operation_pattern == "UPDATE":
+            system_prompt = """You are formatting an UPDATE operation response for Discord. 
 
 🔴 ERROR HANDLING FIRST 🔴
 BEFORE formatting any data, check:
@@ -1091,40 +1141,65 @@ FORMATTING RULES:
 
 Keep response under 1500 chars. Be concise and professional."""
         
-        # Log the data we're about to format
-        logger.info(f"Formatting response with data keys: {sdk_response.keys() if isinstance(sdk_response, dict) else type(sdk_response)}")
-        if isinstance(sdk_response, dict) and "results" in sdk_response:
-            if "city_metrics" in sdk_response["results"]:
-                logger.info(f"City metrics found: {len(sdk_response['results']['city_metrics'])} cities")
-                # Log the actual values to debug
-                for city in sdk_response['results']['city_metrics']:
-                    logger.info(f"  - {city['city']}: ${city['spend']:.2f} (ROAS: {city['roas']:.2f})")
+        elif operation_pattern == "QUERY":
+            system_prompt = """You are formatting a QUERY operation response for Discord.
+
+🔍 AUTONOMOUS PATTERN RECOGNITION:
+1. Look for DATA patterns:
+   - Arrays of similar objects (list of items)
+   - Objects with numeric values (metrics)
+   - Objects with text values (names, identifiers)
+   
+2. Identify the data structure:
+   - Is it a list of items? Format as a list
+   - Is it metrics data? Show the numbers
+   - Is it a single item? Show its details
+   
+3. Extract values based on PATTERNS:
+   - Look for name-like fields (containing 'name', 'title', 'label')
+   - Look for numeric fields (numbers, decimals)
+   - Look for identifier fields (containing 'id', 'key')
+
+📝 FORMAT:
+Present the data cleanly based on what you find:
+- For lists: Show each item
+- For metrics: Show the values
+- Use exact numbers, no rounding
+- Add emojis sparingly for visual appeal
+
+DO NOT look for specific field names like 'city_metrics'.
+Recognize and format whatever data patterns you find.
+
+Keep response under 1500 chars. Be concise and professional."""
         
-        # Prepare data for LLM - ALWAYS prioritize city_metrics if present
-        if isinstance(sdk_response, dict) and "results" in sdk_response and "city_metrics" in sdk_response["results"]:
-            # We have city_metrics! Send it directly to LLM
-            city_metrics = sdk_response["results"]["city_metrics"]
-            data_for_llm = {
-                "city_metrics": city_metrics,
-                "request": request,
-                "total_cities": len(city_metrics)
-            }
-            data_str = json.dumps(data_for_llm, indent=2)
-            logger.info(f"✅ Sending city_metrics directly to LLM: {len(city_metrics)} cities")
         else:
-            # No city_metrics, send full response (truncated if needed)
-            data_str = json.dumps(sdk_response, indent=2)
-            if len(data_str) > 8000:
-                data_str = data_str[:8000]
-            logger.warning("⚠️ No city_metrics found, sending raw SDK response")
+            system_prompt = """You are formatting a response for Discord.
+
+🔍 AUTONOMOUS ANALYSIS:
+1. Analyze the response structure
+2. Identify what type of data this is
+3. Format appropriately based on patterns
+
+Look for patterns, not specific field names:
+- Arrays = lists of items
+- Objects with 'success'/'error' = operation results  
+- Objects with numbers = metrics
+
+Present the information clearly and concisely.
+Keep response under 1500 chars. Be concise and professional."""
         
-        # Log what we're sending to LLM
+        # Log the data we're about to format - NO HARDCODED FIELD CHECKS
+        logger.info(f"Formatting {operation_pattern} response with data keys: {sdk_response.keys() if isinstance(sdk_response, dict) else type(sdk_response)}")
+        
+        # Prepare data for LLM - send the full response without looking for specific fields
+        data_str = json.dumps(sdk_response, indent=2)
+        if len(data_str) > 8000:
+            data_str = data_str[:8000]
+            logger.info("Response truncated to 8000 chars")
+        
+        # Log what patterns we're sending
         logger.info(f"Sending to LLM - Data length: {len(data_str)} chars")
-        if "city_metrics" in data_str:
-            logger.info("city_metrics IS present in data being sent to LLM")
-        else:
-            logger.warning("WARNING: city_metrics NOT found in data being sent to LLM!")
-            logger.info(f"Data keys present: {list(sdk_response.get('results', {}).keys()) if isinstance(sdk_response, dict) else 'Not a dict'}")
+        logger.info(f"Using {operation_pattern} pattern formatting")
         
         messages = [
             SystemMessage(content=system_prompt),
@@ -1134,27 +1209,21 @@ Keep response under 1500 chars. Be concise and professional."""
         
         response = await self.llm.ainvoke(messages)
         
-        # Post-validation: Check if LLM used real data
+        # Post-validation: Pattern-based validation (no hardcoded fields)
         final_answer = response.content
         
-        # Simple validation - if we had city_metrics, check if values appear in response  
-        if has_valid_data and "city_metrics" in data_str:
+        # Validate based on operation pattern
+        if operation_pattern == "UPDATE":
+            # For UPDATE operations, check if response mentions success/failure
+            if "success" not in final_answer.lower() and "error" not in final_answer.lower() and "update" not in final_answer.lower():
+                logger.warning("⚠️ UPDATE response may be missing status indication")
+        elif operation_pattern == "QUERY":
+            # For QUERY operations, check if response has data
             import re
-            # Extract amounts from response
+            # Check for numeric values in response
             response_amounts = re.findall(r'\$([\d,]+\.?\d*)', final_answer)
-            
-            # Check if at least some real values appear
-            found_real_value = False
-            if isinstance(sdk_response, dict) and "results" in sdk_response:
-                metrics = sdk_response["results"].get("city_metrics", [])
-                for city in metrics:
-                    spend_str = f"{city['spend']:.2f}" if city['spend'] > 0 else "0.00"
-                    if spend_str in final_answer:
-                        found_real_value = True
-                        break
-            
-            if not found_real_value and len(response_amounts) > 3:
-                logger.warning("⚠️ Response may contain hallucinated values!")
+            if len(response_amounts) == 0 and "no data" not in final_answer.lower() and "unable" not in final_answer.lower():
+                logger.warning("⚠️ QUERY response may be missing data")
         
         state["final_answer"] = final_answer
         state["messages"].append(AIMessage(content=final_answer))
