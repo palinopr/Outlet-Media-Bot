@@ -507,37 +507,38 @@ IMPORTANT:
         # Use LLM to format the response nicely
         system_prompt = """You are formatting Meta Ads data for Discord. 
 
-CRITICAL RULES:
-1. **NEVER MAKE UP NUMBERS** - Only use the EXACT data provided
-2. If city_metrics is present, use those EXACT values
-3. If spend is 0.27, show $0.27, NOT $5000
-4. If ROAS is 38.84, show 38.84, NOT 3.5
-5. Present REAL data, even if values seem small
+⚠️ ABSOLUTE CRITICAL RULE ⚠️
+YOU MUST USE THE EXACT NUMBERS FROM THE DATA PROVIDED.
+DO NOT ROUND UP. DO NOT ESTIMATE. DO NOT MAKE UP NUMBERS.
 
-Format guidelines:
-- Emojis for visual appeal
-- Tables for multiple cities
-- Bold for important numbers
+If the data shows:
+- spend: 0.27 → You write: $0.27 (NOT $5000)
+- spend: 3.53 → You write: $3.53 (NOT $7000) 
+- roas: 38.84 → You write: 38.84 (NOT 3.5)
 
-For city_metrics data:
-- Use the EXACT spend values (already in dollars)
-- Use the EXACT ROAS values provided
-- Show all cities in the data
-- Never invent or estimate values
+LOOK FOR "city_metrics" IN THE DATA:
+This contains the REAL values you MUST use.
 
-Example: If data shows:
-{"city": "Brooklyn", "spend": 3.53, "roas": 28.44}
-You MUST show: Brooklyn: $3.53 (ROAS: 28.44)
-NOT: Brooklyn: $7,000 (ROAS: 5.2)
+Format as a table but with EXACT values from city_metrics.
+The spend values are already in dollars.
+The ROAS values are already calculated.
 
-Keep it under 2000 characters.
-Answer exactly what was asked with REAL data only."""
+DO NOT CREATE FAKE CITIES like "Los Angeles, CA" or "Houston, TX"
+USE THE EXACT CITY NAMES from the data like "Sende Tour - LA"
+
+If you see small numbers like $0.27, that's CORRECT. These are test campaigns.
+Small numbers are REAL. Use them EXACTLY.
+
+Keep it under 2000 characters."""
         
         # Log the data we're about to format
         logger.info(f"Formatting response with data keys: {sdk_response.keys() if isinstance(sdk_response, dict) else type(sdk_response)}")
         if isinstance(sdk_response, dict) and "results" in sdk_response:
             if "city_metrics" in sdk_response["results"]:
                 logger.info(f"City metrics found: {len(sdk_response['results']['city_metrics'])} cities")
+                # Log the actual values to debug
+                for city in sdk_response['results']['city_metrics']:
+                    logger.info(f"  - {city['city']}: ${city['spend']:.2f} (ROAS: {city['roas']:.2f})")
         
         # Don't truncate important data - prioritize city_metrics if present
         data_str = json.dumps(sdk_response, indent=2)
@@ -551,6 +552,14 @@ Answer exactly what was asked with REAL data only."""
                 data_str = json.dumps(priority_data, indent=2)
             else:
                 data_str = data_str[:8000]
+        
+        # Log what we're sending to LLM
+        logger.info(f"Sending to LLM - Data length: {len(data_str)} chars")
+        if "city_metrics" in data_str:
+            logger.info("city_metrics IS present in data being sent to LLM")
+        else:
+            logger.warning("WARNING: city_metrics NOT found in data being sent to LLM!")
+            logger.info(f"Data keys present: {list(sdk_response.get('results', {}).keys()) if isinstance(sdk_response, dict) else 'Not a dict'}")
         
         messages = [
             SystemMessage(content=system_prompt),
