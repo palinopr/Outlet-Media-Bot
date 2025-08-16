@@ -6,6 +6,7 @@ Enhanced with multi-step planning and autonomous operation chaining
 import os
 import logging
 import json
+import inspect
 from typing import Dict, Any, List, TypedDict, Annotated
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
@@ -73,7 +74,6 @@ class MetaAdsAgent:
         sdk_methods = [method for method in dir(self.sdk) if not method.startswith('_')]
         
         # Get actual method signatures dynamically using introspection
-        import inspect
         method_signatures = []
         for method_name in sdk_methods:
             if hasattr(self.sdk, method_name):
@@ -113,6 +113,9 @@ THINKING PATTERNS (How to approach problems):
    - Methods starting with 'get_' retrieve data
    - Methods with 'insights' return metrics (spend, ROAS, clicks)
    - Methods with 'adset' work with cities/locations
+   - Understand relationships: campaigns contain adsets, adsets represent cities
+   - get_campaign_insights = overall campaign metrics
+   - get_adset_insights = metrics for specific city/location
 
 🧩 UNDERSTANDING PARAMETERS:
    - param=None means optional - you can omit it
@@ -127,6 +130,10 @@ THINKING PATTERNS (How to approach problems):
    - "active/paused" = status filtering
    - When user asks for specific names, use search methods
    - When user asks for metrics, use insights methods
+   - "by city" or "per city" = need BREAKDOWN, not total
+   - "for each city" = iterate through adsets
+   - "total" or "overall" = campaign-level is enough
+   - Plural + "tell me" = user wants details for ALL items
 
 📊 INSIGHTS PATTERN:
    - Insights methods accept date_preset parameter
@@ -149,29 +156,27 @@ THINKING PATTERNS (How to approach problems):
    4. Plan the sequence of calls
    5. Handle results intelligently
 
-🔁 THINKING ABOUT ITERATION:
-   - User says "cities" (plural) = need data for ALL items
-   - User says "by city" = need separate data for EACH item
-   - When a method returns a LIST and you need details for each:
-     • Think: Can any method handle multiple items at once?
-     • Think: Does any method have a 'breakdown' parameter?
-     • Think: What identifies each item? (usually 'id')
-   - Your plan expresses INTENT, not literal execution
-   - The system handles actual value substitution
+🔁 EXPRESSING ITERATION INTENT:
+   - When you need data for EACH item in a list:
+     • Use "iterate_on": "result_from_X" in your operation
+     • This tells the system to run this operation for EACH item
+   - Example: User asks "spend by city" and step 2 returns 6 cities:
+     • Add "iterate_on": "result_from_1" to get insights for EACH city
+   - The system automatically handles the iteration
+   - You just express WHAT you want, not HOW to loop
 
-📝 PLANNING VS EXECUTION:
-   - PLANNING: You express what you want to achieve
-   - EXECUTION: The system makes it happen with real values
-   - "result_from_X" means: use the data from step X
-   - When planning iteration: express the pattern, not literal values
-   - Focus on WHAT you need, let the system handle HOW
+📝 DYNAMIC THINKING PATTERN:
+   - Analyze what the user wants
+   - Identify what data structure you'll get (single item vs list)
+   - Decide if you need details for each item
+   - Use "iterate_on" when you need to process each item
+   - Let the system handle the execution details
 
 💡 WHEN USER ASKS FOR METRICS BY CITY:
    - Cities are adsets in Meta Ads
-   - "by city" means separate metrics for each location
-   - Think: Which method gives city-level breakdown?
-   - If get_adset_insights exists, use it for each city
-   - Express your intent clearly in the plan
+   - "by city" = need metrics for EACH adset separately
+   - Plan: get adsets, then iterate to get insights for each
+   - Use "iterate_on" to express this intent
 
 🔄 HANDLING EMPTY RESULTS:
    - If insights return empty, try different date_preset
@@ -210,27 +215,32 @@ For multi-step operations:
     "intent": "what you understood the user wants",
     "operations": [
         {"sdk_method": "method1", "parameters": {"param": "value"}},
-        {"sdk_method": "method2", "parameters": {"id": "result_from_0"}, "uses_result_from": 0}
+        {"sdk_method": "method2", "parameters": {"id": "result_from_0"}, "uses_result_from": 0},
+        {"sdk_method": "method3", "parameters": {"date_preset": "last_7d"}, "iterate_on": "result_from_1"}
     ]
 }
 
-When you need data for multiple items:
-Think first - is there a method that handles this naturally?
-- Look for methods with 'all' in the name
-- Check if any method accepts multiple IDs
-- See if campaign-level methods provide breakdowns
+Use "iterate_on": "result_from_X" when you need to run an operation for EACH item in a list result.
 
-If you must get data for each item separately:
+When you need data for multiple items:
+Think: Do I need the same operation for each item?
+If yes, use "iterate_on" to express this:
+
+Example - Getting metrics for each city:
 {
-    "reasoning": "Need city-level metrics. Get adsets first, then plan insights for each",
-    "intent": "Get spend and ROAS by city",
-    "note": "Will need to get insights for each adset individually",
+    "reasoning": "User wants metrics BY city. Need to get insights for EACH adset",
+    "intent": "Get spend and ROAS for each city individually",
     "operations": [
         {"sdk_method": "search_campaigns", "parameters": {"query": "name"}},
         {"sdk_method": "get_adsets_for_campaign", "parameters": {"campaign_id": "result_from_0"}, "uses_result_from": 0},
-        {"sdk_method": "get_campaign_insights", "parameters": {"campaign_id": "result_from_0", "date_preset": "last_7d"}, "uses_result_from": 0}
+        {"sdk_method": "get_adset_insights", "parameters": {"date_preset": "last_7d"}, "iterate_on": "result_from_1"}
     ]
 }
+
+The "iterate_on" field tells the system:
+- Run this operation multiple times
+- Once for each item from the specified result
+- Collect all results together
 
 For single operations:
 {
@@ -241,9 +251,10 @@ For single operations:
 }
 
 IMPORTANT: 
-- Use "result_from_X" when you need an ID from step X
+- Use "result_from_X" in parameters when you need an ID from step X
+- Use "iterate_on": "result_from_X" when you need to process EACH item from step X
 - Choose date_preset based on user's request (recent = last_7d, all = lifetime)
-- If user wants metrics "by city" - plan MULTIPLE get_adset_insights calls
+- If user wants metrics "by city" - use iterate_on with get_adset_insights
 - For optional parameters like 'fields' - omit them to use defaults
 - When you get a list of items, think: do I need details for each?
 - Don't pass strings to parameters expecting lists
@@ -296,7 +307,62 @@ IMPORTANT:
                 parameters = operation.get("parameters", {})
                 uses_result = operation.get("uses_result_from")
                 
-                # If this operation uses results from a previous one
+                # Check if this operation should iterate over results
+                iterate_on = operation.get("iterate_on")
+                if iterate_on and isinstance(iterate_on, str) and iterate_on.startswith("result_from_"):
+                    # Extract the result index to iterate on
+                    try:
+                        iterate_index = int(iterate_on.split("_")[-1])
+                        if iterate_index < len(results):
+                            items_to_iterate = results[iterate_index]
+                            if isinstance(items_to_iterate, list):
+                                # Execute this operation for each item
+                                iteration_results = []
+                                for item in items_to_iterate:
+                                    item_id = item.get("id") if isinstance(item, dict) else None
+                                    if item_id:
+                                        # Create parameters for this iteration
+                                        iter_params = parameters.copy()
+                                        # Add the ID parameter - try to be smart about parameter name
+                                        # Check method signature to determine correct parameter name
+                                        try:
+                                            method = getattr(self.sdk, method_name, None)
+                                            if method and callable(method):
+                                                sig = inspect.signature(method)
+                                                param_names = list(sig.parameters.keys())
+                                                # Try to find the right parameter name
+                                                if "adset_id" in param_names:
+                                                    iter_params["adset_id"] = item_id
+                                                elif "id" in param_names:
+                                                    iter_params["id"] = item_id
+                                                elif "campaign_id" in param_names:
+                                                    iter_params["campaign_id"] = item_id
+                                                else:
+                                                    # Default to 'id' if we can't determine
+                                                    iter_params["id"] = item_id
+                                        except:
+                                            # Fallback to 'id' if inspection fails
+                                            iter_params["id"] = item_id
+                                        
+                                        logger.info(f"Iterating {method_name} for item {item.get('name', item_id)}")
+                                        try:
+                                            method = getattr(self.sdk, method_name, None)
+                                            if method:
+                                                iter_result = method(**iter_params)
+                                                # Add context about which item this is for
+                                                if isinstance(iter_result, dict):
+                                                    iter_result["_for_item"] = {"id": item_id, "name": item.get("name", "")}
+                                                iteration_results.append(iter_result)
+                                        except Exception as e:
+                                            logger.error(f"Error in iteration for {item_id}: {e}")
+                                            iteration_results.append({"error": str(e), "_for_item": {"id": item_id}})
+                                
+                                results.append(iteration_results)
+                                continue  # Skip normal execution since we iterated
+                    except (ValueError, IndexError):
+                        logger.error(f"Invalid iterate_on value: {iterate_on}")
+                
+                # Normal execution (non-iteration) with result substitution
                 if uses_result is not None and uses_result < len(results):
                     prev_result = results[uses_result]
                     # Extract ID from previous result and substitute placeholders
@@ -318,6 +384,10 @@ IMPORTANT:
                 if method_name.startswith("sdk."):
                     method_name = method_name[4:]
                 
+                # Skip if we already handled this as an iteration
+                if iterate_on and iterate_on.startswith("result_from_"):
+                    continue
+                    
                 logger.info(f"Step {i+1}: {method_name} with params: {parameters}")
                 
                 # Execute this step
@@ -403,7 +473,27 @@ IMPORTANT:
             
             for i, (op, result) in enumerate(zip(operations, results)):
                 step_name = op.get("sdk_method", "unknown")
-                if "search" in step_name and isinstance(result, list) and len(result) > 0:
+                
+                # Check if this was an iterated operation
+                if op.get("iterate_on") and isinstance(result, list):
+                    # This is an array of results from iteration
+                    formatted_data["results"][f"{step_name}_per_item"] = result
+                    # If these are insights, also create a summary
+                    if "insights" in step_name:
+                        formatted_data["results"]["city_metrics"] = []
+                        for item_result in result:
+                            if isinstance(item_result, dict) and "_for_item" in item_result:
+                                city_name = item_result["_for_item"].get("name", "Unknown")
+                                spend = item_result.get("spend_dollars", item_result.get("spend", 0))
+                                roas = item_result.get("roas", 0)
+                                formatted_data["results"]["city_metrics"].append({
+                                    "city": city_name,
+                                    "spend": spend,
+                                    "roas": roas,
+                                    "impressions": item_result.get("impressions", 0),
+                                    "clicks": item_result.get("clicks", 0)
+                                })
+                elif "search" in step_name and isinstance(result, list) and len(result) > 0:
                     formatted_data["results"]["found_item"] = result[0]
                 elif "adsets" in step_name:
                     formatted_data["results"]["adsets"] = result
@@ -422,10 +512,18 @@ Create a clear, concise response using:
 - Bold for important numbers
 - Tables if helpful (using Discord markdown)
 
+For city-level metrics (city_metrics in results):
+- Present each city's data clearly
+- Show spend in dollars (already converted)
+- Show ROAS values
+- Group by city name
+- Use a table format if multiple cities
+
 For multi-step results:
 - Combine the data logically
-- If there are campaigns, adsets (cities), and insights - present them together
-- Show the complete picture the user asked for
+- Focus on answering what the user asked for
+- If they asked "by city" - show city breakdown
+- Don't just show campaign totals if they wanted details
 
 For UPDATE operations:
 - Clearly confirm what was changed
