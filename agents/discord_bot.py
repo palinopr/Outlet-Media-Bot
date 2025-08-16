@@ -133,6 +133,9 @@ class MetaAdsDiscordBot:
         
         @self.client.event
         async def on_message(message: discord.Message):
+            # Log all messages for debugging
+            logger.debug(f"Message from {message.author}: {message.content[:50]}...")
+            
             # Ignore bot's own messages
             if message.author == self.client.user:
                 return
@@ -141,9 +144,12 @@ class MetaAdsDiscordBot:
             is_mention = self.client.user in message.mentions
             is_dm = isinstance(message.channel, discord.DMChannel)
             
+            logger.info(f"Message check - Mention: {is_mention}, DM: {is_dm}, Author: {message.author}")
+            
             if not (is_mention or is_dm):
                 return
             
+            logger.info(f"Processing message from {message.author}: {message.content[:100]}")
             await self.handle_message(message)
     
     async def handle_message(self, message: discord.Message):
@@ -185,7 +191,9 @@ class MetaAdsDiscordBot:
                             else:
                                 await message.channel.send(chunk)
                     else:
+                        logger.info(f"Sending response to Discord: {response[:100]}...")
                         await message.reply(response)
+                        logger.info("✅ Response sent successfully to Discord")
                         
                 except Exception as e:
                     logger.error(f"Agent error: {e}", exc_info=True)
