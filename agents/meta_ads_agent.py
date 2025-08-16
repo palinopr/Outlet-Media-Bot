@@ -105,6 +105,13 @@ THINKING PATTERNS (How to approach problems):
    - Methods with 'insights' return metrics (spend, ROAS, clicks)
    - Methods with 'adset' work with cities/locations
 
+🧩 UNDERSTANDING PARAMETERS:
+   - param=None means optional - you can omit it
+   - 'fields' parameters usually expect a list: ['field1', 'field2']
+   - NEVER pass comma-separated strings like "field1,field2" 
+   - When in doubt, omit optional parameters and use defaults
+   - Look at parameter names for hints: 'fields' = list, 'query' = string
+
 🎯 UNDERSTANDING USER INTENT:
    - "cities" = adsets in Meta Ads
    - "spend/ROAS/performance" = insights data
@@ -118,6 +125,7 @@ THINKING PATTERNS (How to approach problems):
    - If user asks for recent data, use "last_7d" by default
    - If user asks for all-time data, use "lifetime"
    - For city-level metrics, use get_adset_insights if available
+   - Don't specify fields parameter unless needed - defaults work well
 
 🔗 MULTI-STEP THINKING:
    - Break complex requests into steps
@@ -132,17 +140,39 @@ THINKING PATTERNS (How to approach problems):
    4. Plan the sequence of calls
    5. Handle results intelligently
 
+🔁 ITERATION PATTERN (When to call multiple times):
+   - User says "cities" (plural) = iterate through ALL cities
+   - User says "by city" = get metrics for EACH city separately
+   - When you get a list and need details for each item:
+     Plan multiple operations, one for each item
+   - Example: If you find 5 adsets and need insights for each:
+     operations: [
+       {"sdk_method": "get_adset_insights", "parameters": {"adset_id": "id1"}},
+       {"sdk_method": "get_adset_insights", "parameters": {"adset_id": "id2"}},
+       {"sdk_method": "get_adset_insights", "parameters": {"adset_id": "id3"}},
+       // ... for each adset
+     ]
+
 💡 WHEN USER ASKS FOR METRICS BY CITY:
-   - Cities are adsets
-   - Look for methods with 'adset' and 'insights'
-   - get_adset_insights can get metrics per city
-   - Plan: search campaign → get adsets → get insights for each
+   - Cities are adsets in Meta Ads
+   - "by city" means get insights for EACH adset separately
+   - Don't just get insights for one - iterate through all
+   - Plan: search campaign → get adsets → get insights for EACH adset
 
 🔄 HANDLING EMPTY RESULTS:
    - If insights return empty, try different date_preset
    - Start with "last_7d" for recent data
    - Try "lifetime" for all-time data
    - Explain to user what you tried
+
+❌ UNDERSTANDING ERRORS:
+   - "Field X specified more than once" = you passed wrong parameter format
+     → Usually means you passed a string instead of a list
+   - "Invalid field" = field name doesn't exist
+     → Check available fields or omit the parameter
+   - Empty results = no data for that time period
+     → Try different date_preset or explain no activity
+   - Learn from errors and adjust your approach
 
 META ADS HIERARCHY:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -181,8 +211,11 @@ For single operations:
 IMPORTANT: 
 - Use "result_from_X" when you need an ID from step X
 - Choose date_preset based on user's request (recent = last_7d, all = lifetime)
-- If user wants city metrics, plan to get insights for each adset
-- Think autonomously - figure out the best approach!"""
+- If user wants metrics "by city" - plan MULTIPLE get_adset_insights calls
+- For optional parameters like 'fields' - omit them to use defaults
+- When you get a list of items, think: do I need details for each?
+- Don't pass strings to parameters expecting lists
+- Think step by step - what data do I need and how do I get it?"""
         
         messages = [
             SystemMessage(content=system_prompt),
