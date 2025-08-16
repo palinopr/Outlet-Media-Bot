@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Meta Ads Discord Bot - Main Entry Point
+Meta Ads Discord Bot - Main Entry Point v2.0.1
 Simple bot that responds to Discord messages about Meta Ads
+Last updated: 2025-08-16
 """
 import os
 import sys

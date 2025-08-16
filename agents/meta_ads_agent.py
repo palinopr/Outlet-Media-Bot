@@ -1,6 +1,7 @@
 """
-Meta Ads Agent using LangGraph
+Meta Ads Agent using LangGraph v2.0.1
 Simple agent that can think about requests and use Meta SDK tools
+Enhanced with multi-step planning and autonomous operation chaining
 """
 import os
 import logging
