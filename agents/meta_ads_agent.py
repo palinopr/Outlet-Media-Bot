@@ -158,6 +158,9 @@ THINKING PATTERNS (How to approach problems):
    - Example: "update Brooklyn to $200" → update_adset_budget(daily_budget=200)
    - Never multiply by 100 yourself - SDK does this
    - To find specific adset: search or get campaign's adsets then filter
+   - VERIFY SUCCESS: Check response has success=True before confirming
+   - If update fails, report the error, don't claim success
+   - After update, you may want to fetch updated values to confirm
 
 📊 INSIGHTS PATTERN - DATE SELECTION:
    - Insights methods accept date_preset parameter
@@ -214,6 +217,16 @@ THINKING PATTERNS (How to approach problems):
    - Try "lifetime" for all-time data
    - Explain to user what you tried
 
+⚠️ DATA VALIDATION THINKING:
+   - ALWAYS verify data exists before using it
+   - Check data structure: Does 'city_metrics' exist? Is it an array?
+   - If data is missing or empty, SAY SO - never make up values
+   - Navigate JSON carefully: data['results']['city_metrics'][0]['spend']
+   - Each step can fail - check at every level
+   - Better to say "Data unavailable" than invent numbers
+   - When formatting, extract values DIRECTLY from source
+   - NEVER approximate, estimate, or round unless you have the exact source value
+
 ❌ UNDERSTANDING ERRORS & RECOVERY:
    - "Field X specified more than once" = you passed wrong parameter format
      → Usually means you passed a string instead of a list
@@ -227,6 +240,15 @@ THINKING PATTERNS (How to approach problems):
      → Can't search adsets? Get campaign first, then its adsets
      → Can't find by name? Get all and filter
    - Learn from errors and adjust your approach
+
+✅ OPERATION VERIFICATION PATTERNS:
+   - After any update operation, check the response
+   - Look for success=True or error fields
+   - Don't assume success - verify it
+   - If operation claims success but no data changes, investigate
+   - For budget updates: response['success'] must be True
+   - Only tell user "updated successfully" if verified
+   - If unsure, say "Update requested" not "Update completed"
 
 META ADS HIERARCHY:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -293,7 +315,15 @@ IMPORTANT:
 - For optional parameters like 'fields' - omit them to use defaults
 - When you get a list of items, think: do I need details for each?
 - Don't pass strings to parameters expecting lists
-- Think step by step - what data do I need and how do I get it?"""
+- Think step by step - what data do I need and how do I get it?
+
+🎯 ACCURACY PRINCIPLES:
+- Real data is better than any data
+- "I don't know" is better than wrong information
+- Empty response is better than hallucinated response
+- Verify everything, assume nothing
+- If data seems wrong (all zeros, huge numbers), question it
+- Your credibility depends on accuracy, not appearing helpful"""
         
         messages = [
             SystemMessage(content=system_prompt),
@@ -387,6 +417,10 @@ IMPORTANT:
                                                 # Add context about which item this is for
                                                 if isinstance(iter_result, dict):
                                                     iter_result["_for_item"] = {"id": item_id, "name": item.get("name", "")}
+                                                    # Log the actual data we got
+                                                    if "spend" in iter_result or "spend_dollars" in iter_result:
+                                                        spend = iter_result.get("spend_dollars", iter_result.get("spend", 0))
+                                                        logger.info(f"  → Got spend for {item.get('name', 'Unknown')}: ${spend}")
                                                 iteration_results.append(iter_result)
                                         except Exception as e:
                                             logger.error(f"Error in iteration for {item_id}: {e}")
@@ -406,6 +440,11 @@ IMPORTANT:
                         result_id = prev_result[0].get("id")
                     elif isinstance(prev_result, dict):
                         result_id = prev_result.get("id")
+                        # For update operations, check if previous step was successful
+                        if "update" in method_name.lower() and prev_result.get("error"):
+                            logger.error(f"Skipping {method_name} due to previous error: {prev_result['error']}")
+                            results.append({"error": "Skipped due to previous error", "previous_error": prev_result['error']})
+                            continue
                     
                     # Replace placeholder values with actual IDs
                     if result_id:
@@ -493,6 +532,9 @@ IMPORTANT:
         sdk_response = state.get("sdk_response", {})
         request = state["current_request"]
         
+        # Track if we have valid data for validation later
+        has_valid_data = False
+        
         # Check if this was a multi-step operation
         if "multi_step_results" in sdk_response:
             # Format multi-step results specially
@@ -523,7 +565,14 @@ IMPORTANT:
                                 spend = item_result.get("spend_dollars", 0)
                                 if not spend and "spend" in item_result:
                                     spend = float(item_result["spend"]) if item_result["spend"] else 0
+                                
+                                # Extract ROAS correctly
                                 roas = item_result.get("roas", 0)
+                                if not roas and "purchase_roas" in item_result:
+                                    purchase_roas = item_result["purchase_roas"]
+                                    if isinstance(purchase_roas, list) and len(purchase_roas) > 0:
+                                        roas = float(purchase_roas[0].get("value", 0))
+                                
                                 formatted_data["results"]["city_metrics"].append({
                                     "city": city_name,
                                     "spend": spend,
@@ -531,6 +580,11 @@ IMPORTANT:
                                     "impressions": item_result.get("impressions", 0),
                                     "clicks": item_result.get("clicks", 0)
                                 })
+                        
+                        # Log what we built
+                        logger.info(f"Built city_metrics with {len(formatted_data['results']['city_metrics'])} cities")
+                        for city in formatted_data["results"]["city_metrics"]:
+                            logger.info(f"  - {city['city']}: ${city['spend']:.2f} (ROAS: {city['roas']:.2f})")
                 elif "search" in step_name and isinstance(result, list) and len(result) > 0:
                     formatted_data["results"]["found_item"] = result[0]
                 elif "adsets" in step_name:
@@ -541,11 +595,51 @@ IMPORTANT:
                     formatted_data["results"][f"step_{i+1}_{step_name}"] = result
             
             sdk_response = formatted_data
+            # Log that we built city_metrics
+            if "city_metrics" in formatted_data.get("results", {}):
+                has_valid_data = True
+                logger.info(f"✅ Successfully built city_metrics with {len(formatted_data['results']['city_metrics'])} cities")
         
         # Use LLM to format the response nicely
         system_prompt = """You are formatting Meta Ads data for Discord. 
 
+🚨 CRITICAL DATA EXTRACTION PROCESS 🚨
+
+You MUST follow these steps EXACTLY:
+
+STEP 1: Locate the data
+  - Look for 'city_metrics' in the provided JSON
+  - It should be an array of city objects
+  - If not found, respond: "Unable to retrieve metrics data"
+
+STEP 2: Extract values for each city
+  - For each city object in city_metrics:
+    - City name: city['city'] 
+    - Spend: city['spend'] (use EXACTLY as provided)
+    - ROAS: city['roas'] (use EXACTLY as provided)
+  - If a field is missing, write "N/A" not a number
+
+STEP 3: Validation
+  - ONLY use numbers that appear in the source data
+  - NEVER generate, estimate, or round numbers
+  - If you can't find a value, DO NOT make one up
+  - Better to show "Data unavailable" than fake numbers
+
+STEP 4: Format the output
+  - Use the EXACT values from city_metrics
+  - NEVER round or modify values
+  - If spend is 388.08, write $388.08, NOT $388
+  - If spend is 52.91, write $52.91, NOT $53
+  - Always include 2 decimal places for spend values
+  - Copy numbers EXACTLY as they appear in the data
+
 ⚠️ CRITICAL: USE EXACT NUMBERS FROM city_metrics - NO ROUNDING OR ESTIMATES ⚠️
+
+🛑 HALLUCINATION CHECK:
+Before outputting ANY number, ask yourself:
+  - Did I extract this EXACT value from city_metrics?
+  - Am I copying it precisely without modification?
+  - If not, STOP and write "N/A" instead
 
 FORMATTING RULES:
 1. Clean up city names:
@@ -557,12 +651,11 @@ FORMATTING RULES:
    - "Sende Tour - Retargeting - exclude sales" → "**Retargeting**"
 
 2. For spend and ROAS values:
-   - Use EXACT numbers from city_metrics
-   - Format spend appropriately:
-     • Under $100: show 2 decimals ($52.91)
-     • Over $100: show as whole dollars ($385)
-     • Never show cents for amounts over $100
-   - Format ROAS with 1-2 decimals
+   - Use EXACT numbers from city_metrics - NO ROUNDING
+   - Always show exact value with 2 decimals: $388.08, $52.91
+   - NEVER round to whole dollars
+   - Copy the exact 'spend' value from city_metrics
+   - Format ROAS with exact decimals from source
    - If ROAS > 20, add 💪 emoji
    - Values are already in dollars, no conversion needed
 
@@ -591,18 +684,23 @@ Keep response under 1500 chars. Be concise and professional."""
                 for city in sdk_response['results']['city_metrics']:
                     logger.info(f"  - {city['city']}: ${city['spend']:.2f} (ROAS: {city['roas']:.2f})")
         
-        # Don't truncate important data - prioritize city_metrics if present
-        data_str = json.dumps(sdk_response, indent=2)
-        if len(data_str) > 8000:  # Increase limit and be smarter about truncation
-            # If we have city_metrics, prioritize showing that
-            if isinstance(sdk_response, dict) and "results" in sdk_response and "city_metrics" in sdk_response["results"]:
-                priority_data = {
-                    "request": sdk_response.get("request", ""),
-                    "city_metrics": sdk_response["results"]["city_metrics"]
-                }
-                data_str = json.dumps(priority_data, indent=2)
-            else:
+        # Prepare data for LLM - ALWAYS prioritize city_metrics if present
+        if isinstance(sdk_response, dict) and "results" in sdk_response and "city_metrics" in sdk_response["results"]:
+            # We have city_metrics! Send it directly to LLM
+            city_metrics = sdk_response["results"]["city_metrics"]
+            data_for_llm = {
+                "city_metrics": city_metrics,
+                "request": request,
+                "total_cities": len(city_metrics)
+            }
+            data_str = json.dumps(data_for_llm, indent=2)
+            logger.info(f"✅ Sending city_metrics directly to LLM: {len(city_metrics)} cities")
+        else:
+            # No city_metrics, send full response (truncated if needed)
+            data_str = json.dumps(sdk_response, indent=2)
+            if len(data_str) > 8000:
                 data_str = data_str[:8000]
+            logger.warning("⚠️ No city_metrics found, sending raw SDK response")
         
         # Log what we're sending to LLM
         logger.info(f"Sending to LLM - Data length: {len(data_str)} chars")
@@ -620,8 +718,30 @@ Keep response under 1500 chars. Be concise and professional."""
         
         response = await self.llm.ainvoke(messages)
         
-        state["final_answer"] = response.content
-        state["messages"].append(AIMessage(content=response.content))
+        # Post-validation: Check if LLM used real data
+        final_answer = response.content
+        
+        # Simple validation - if we had city_metrics, check if values appear in response  
+        if has_valid_data and "city_metrics" in data_str:
+            import re
+            # Extract amounts from response
+            response_amounts = re.findall(r'\$([\d,]+\.?\d*)', final_answer)
+            
+            # Check if at least some real values appear
+            found_real_value = False
+            if isinstance(sdk_response, dict) and "results" in sdk_response:
+                metrics = sdk_response["results"].get("city_metrics", [])
+                for city in metrics:
+                    spend_str = f"{city['spend']:.2f}" if city['spend'] > 0 else "0.00"
+                    if spend_str in final_answer:
+                        found_real_value = True
+                        break
+            
+            if not found_real_value and len(response_amounts) > 3:
+                logger.warning("⚠️ Response may contain hallucinated values!")
+        
+        state["final_answer"] = final_answer
+        state["messages"].append(AIMessage(content=final_answer))
         
         return state
     
