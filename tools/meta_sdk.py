@@ -300,3 +300,202 @@ class MetaAdsSDK:
         except Exception as e:
             logger.error(f"Query error: {e}")
             return {"error": str(e)}
+    
+    # ============= UPDATE METHODS =============
+    # These methods allow modifying campaigns and adsets
+    
+    def update_adset_budget(
+        self,
+        adset_id: str = None,
+        id: str = None,
+        daily_budget: float = None,
+        lifetime_budget: float = None,
+        budget: float = None
+    ) -> Dict:
+        """Update adset budget (values in dollars, converts to cents)
+        
+        Args:
+            adset_id/id: The adset identifier
+            daily_budget/budget: Daily budget in dollars
+            lifetime_budget: Lifetime budget in dollars
+        """
+        try:
+            actual_id = adset_id or id
+            if not actual_id:
+                return {"error": "Please provide adset_id or id"}
+            
+            # Prepare update params
+            params = {}
+            
+            # Convert dollars to cents (Meta API uses cents)
+            if daily_budget is not None:
+                params['daily_budget'] = int(daily_budget * 100)
+            elif budget is not None:
+                params['daily_budget'] = int(budget * 100)
+            
+            if lifetime_budget is not None:
+                params['lifetime_budget'] = int(lifetime_budget * 100)
+            
+            if not params:
+                return {"error": "Please provide daily_budget or lifetime_budget"}
+            
+            # Update the adset
+            adset = AdSet(actual_id)
+            response = adset.update(params=params)
+            
+            logger.info(f"Updated adset {actual_id} budget: {params}")
+            return {
+                "success": True,
+                "adset_id": actual_id,
+                "updated_fields": params,
+                "message": f"Successfully updated budget for adset {actual_id}"
+            }
+            
+        except FacebookRequestError as e:
+            logger.error(f"Facebook API error updating adset: {e}")
+            return {"error": f"Facebook API error: {e.api_error_message()}"}
+        except Exception as e:
+            logger.error(f"Error updating adset: {e}")
+            return {"error": str(e)}
+    
+    def update_campaign_budget(
+        self,
+        campaign_id: str = None,
+        id: str = None,
+        daily_budget: float = None,
+        lifetime_budget: float = None,
+        budget: float = None
+    ) -> Dict:
+        """Update campaign budget (values in dollars, converts to cents)
+        
+        Args:
+            campaign_id/id: The campaign identifier
+            daily_budget/budget: Daily budget in dollars
+            lifetime_budget: Lifetime budget in dollars
+        """
+        try:
+            actual_id = campaign_id or id
+            if not actual_id:
+                return {"error": "Please provide campaign_id or id"}
+            
+            # Prepare update params
+            params = {}
+            
+            # Convert dollars to cents
+            if daily_budget is not None:
+                params['daily_budget'] = int(daily_budget * 100)
+            elif budget is not None:
+                params['daily_budget'] = int(budget * 100)
+            
+            if lifetime_budget is not None:
+                params['lifetime_budget'] = int(lifetime_budget * 100)
+            
+            if not params:
+                return {"error": "Please provide daily_budget or lifetime_budget"}
+            
+            # Update the campaign
+            campaign = Campaign(actual_id)
+            response = campaign.update(params=params)
+            
+            logger.info(f"Updated campaign {actual_id} budget: {params}")
+            return {
+                "success": True,
+                "campaign_id": actual_id,
+                "updated_fields": params,
+                "message": f"Successfully updated budget for campaign {actual_id}"
+            }
+            
+        except FacebookRequestError as e:
+            logger.error(f"Facebook API error updating campaign: {e}")
+            return {"error": f"Facebook API error: {e.api_error_message()}"}
+        except Exception as e:
+            logger.error(f"Error updating campaign: {e}")
+            return {"error": str(e)}
+    
+    def pause_adset(self, adset_id: str = None, id: str = None) -> Dict:
+        """Pause an adset"""
+        try:
+            actual_id = adset_id or id
+            if not actual_id:
+                return {"error": "Please provide adset_id or id"}
+            
+            adset = AdSet(actual_id)
+            response = adset.update(params={'status': 'PAUSED'})
+            
+            logger.info(f"Paused adset {actual_id}")
+            return {
+                "success": True,
+                "adset_id": actual_id,
+                "status": "PAUSED",
+                "message": f"Successfully paused adset {actual_id}"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error pausing adset: {e}")
+            return {"error": str(e)}
+    
+    def resume_adset(self, adset_id: str = None, id: str = None) -> Dict:
+        """Resume/activate an adset"""
+        try:
+            actual_id = adset_id or id
+            if not actual_id:
+                return {"error": "Please provide adset_id or id"}
+            
+            adset = AdSet(actual_id)
+            response = adset.update(params={'status': 'ACTIVE'})
+            
+            logger.info(f"Resumed adset {actual_id}")
+            return {
+                "success": True,
+                "adset_id": actual_id,
+                "status": "ACTIVE",
+                "message": f"Successfully activated adset {actual_id}"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error resuming adset: {e}")
+            return {"error": str(e)}
+    
+    def pause_campaign(self, campaign_id: str = None, id: str = None) -> Dict:
+        """Pause a campaign"""
+        try:
+            actual_id = campaign_id or id
+            if not actual_id:
+                return {"error": "Please provide campaign_id or id"}
+            
+            campaign = Campaign(actual_id)
+            response = campaign.update(params={'status': 'PAUSED'})
+            
+            logger.info(f"Paused campaign {actual_id}")
+            return {
+                "success": True,
+                "campaign_id": actual_id,
+                "status": "PAUSED",
+                "message": f"Successfully paused campaign {actual_id}"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error pausing campaign: {e}")
+            return {"error": str(e)}
+    
+    def resume_campaign(self, campaign_id: str = None, id: str = None) -> Dict:
+        """Resume/activate a campaign"""
+        try:
+            actual_id = campaign_id or id
+            if not actual_id:
+                return {"error": "Please provide campaign_id or id"}
+            
+            campaign = Campaign(actual_id)
+            response = campaign.update(params={'status': 'ACTIVE'})
+            
+            logger.info(f"Resumed campaign {actual_id}")
+            return {
+                "success": True,
+                "campaign_id": actual_id,
+                "status": "ACTIVE",
+                "message": f"Successfully activated campaign {actual_id}"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error resuming campaign: {e}")
+            return {"error": str(e)}

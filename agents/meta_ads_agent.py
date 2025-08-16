@@ -78,22 +78,33 @@ class MetaAdsAgent:
 To explore what these methods do:
 1. Methods starting with 'get_' retrieve data
 2. 'search_' methods find items by name/query
-3. 'query' is a flexible method for any operation
+3. 'update_' methods MODIFY data (be careful!)
+4. 'pause_' and 'resume_' methods control campaign/adset status
+5. 'query' is a flexible method for any operation
 
 Important context about Meta Ads structure:
 - Campaigns contain Ad Sets, which contain Ads
 - Ad Sets often represent geographic targeting (cities, regions)
 - When users mention "cities", they usually mean Ad Sets
 
-When a user asks about something by NAME (like "Ryan" or "Miami"):
-- First, search for it to get the actual ID
-- Then use that ID for detailed operations
-- For "cities" or location names, use search_adsets
+CRITICAL for update operations:
+- Budget values: When users say "$500", they mean dollars. The API needs cents, so multiply by 100
+- Always search first: Before updating "Miami budget", search for the Miami adset to get its ID
+- Chain operations: search -> get ID -> update with that ID
+- Be careful with updates - they modify real campaigns!
+
+When a user asks to UPDATE something (like "set Miami budget to $500"):
+1. First, search for the item by name (search_adsets for "Miami")
+2. Get the ID from search results
+3. Convert dollar amounts to cents (* 100)
+4. Call the update method with the ID and converted value
 
 Think step by step:
 1. What is the user asking for?
-2. Do I need to search for something by name first?
-3. What method would get that information?
+2. Is this a read or write operation?
+3. Do I need to search for something by name first?
+4. Do I need to convert units (dollars to cents)?
+5. What method(s) would accomplish this?
 
 Return your reasoning and plan as JSON:
 {{
@@ -164,10 +175,12 @@ Be creative and explore! If you're not sure, try the most logical method."""
                 else:
                     result = method()
             
+            # Handle intelligent chaining for different operations
+            request_lower = state["current_request"].lower()
+            
             # If we got campaign search results and need insights, chain the operations
             if method_name == "search_campaigns" and isinstance(result, list) and len(result) > 0:
                 # Check if user wanted more details
-                request_lower = state["current_request"].lower()
                 if "spend" in request_lower or "roas" in request_lower or "performance" in request_lower:
                     # Get insights for the found campaign
                     campaign_id = result[0].get('id')
@@ -190,6 +203,25 @@ Be creative and explore! If you're not sure, try the most logical method."""
                             "campaign": result[0],
                             "adsets": adsets
                         }
+            
+            # Handle update operations that need search first
+            elif method_name == "search_adsets" and isinstance(result, list) and len(result) > 0:
+                # Check if user wants to update budget
+                if "budget" in request_lower or "update" in request_lower or "set" in request_lower or "change" in request_lower:
+                    adset_id = result[0].get('id')
+                    if adset_id:
+                        # Extract budget amount from request
+                        import re
+                        budget_match = re.search(r'\$?(\d+(?:,\d{3})*(?:\.\d{2})?)', state["current_request"])
+                        if budget_match:
+                            budget_amount = float(budget_match.group(1).replace(',', ''))
+                            logger.info(f"Autonomously updating adset {adset_id} budget to ${budget_amount}")
+                            update_result = self.sdk.update_adset_budget(adset_id, daily_budget=budget_amount)
+                            # Combine results
+                            result = {
+                                "adset_found": result[0],
+                                "update_result": update_result
+                            }
             
             state["sdk_response"] = result
             state["messages"].append(
@@ -216,6 +248,12 @@ Create a clear, concise response using:
 - Bullet points for lists
 - Bold for important numbers
 - Tables if helpful (using Discord markdown)
+
+For UPDATE operations:
+- Clearly confirm what was changed
+- Show old vs new values if available
+- Use ✅ for success, ❌ for errors
+- Be extra clear about monetary values (show dollars, not cents)
 
 Keep it under 2000 characters.
 Be direct and helpful."""
