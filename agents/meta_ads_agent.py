@@ -80,9 +80,15 @@ To explore what these methods do:
 2. 'search_' methods find items by name/query
 3. 'query' is a flexible method for any operation
 
+Important context about Meta Ads structure:
+- Campaigns contain Ad Sets, which contain Ads
+- Ad Sets often represent geographic targeting (cities, regions)
+- When users mention "cities", they usually mean Ad Sets
+
 When a user asks about something by NAME (like "Ryan" or "Miami"):
 - First, search for it to get the actual ID
 - Then use that ID for detailed operations
+- For "cities" or location names, use search_adsets
 
 Think step by step:
 1. What is the user asking for?
@@ -161,7 +167,8 @@ Be creative and explore! If you're not sure, try the most logical method."""
             # If we got campaign search results and need insights, chain the operations
             if method_name == "search_campaigns" and isinstance(result, list) and len(result) > 0:
                 # Check if user wanted more details
-                if "spend" in state["current_request"].lower() or "roas" in state["current_request"].lower() or "performance" in state["current_request"].lower():
+                request_lower = state["current_request"].lower()
+                if "spend" in request_lower or "roas" in request_lower or "performance" in request_lower:
                     # Get insights for the found campaign
                     campaign_id = result[0].get('id')
                     if campaign_id:
@@ -171,6 +178,17 @@ Be creative and explore! If you're not sure, try the most logical method."""
                         result = {
                             "campaign": result[0],
                             "insights": insights
+                        }
+                # Check if user asked about cities/adsets
+                elif "city" in request_lower or "cities" in request_lower or "adset" in request_lower:
+                    campaign_id = result[0].get('id')
+                    if campaign_id:
+                        logger.info(f"Autonomously getting adsets for campaign {campaign_id}")
+                        adsets = self.sdk.get_adsets_for_campaign(campaign_id)
+                        # Combine results
+                        result = {
+                            "campaign": result[0],
+                            "adsets": adsets
                         }
             
             state["sdk_response"] = result

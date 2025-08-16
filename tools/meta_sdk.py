@@ -83,19 +83,25 @@ class MetaAdsSDK:
     
     def get_campaign_insights(
         self, 
-        campaign_id: str,
+        campaign_id: str = None,
+        id: str = None,
         date_preset: str = "today",
         fields: List[str] = None
     ) -> Dict:
         """Get insights for a specific campaign"""
         try:
+            # Accept both 'campaign_id' and 'id' parameters
+            actual_campaign_id = campaign_id or id
+            if not actual_campaign_id:
+                return {"error": "Please provide a campaign_id or id"}
+                
             if not fields:
                 fields = [
                     'campaign_name', 'impressions', 'clicks', 'spend',
                     'ctr', 'cpc', 'cpm', 'conversions', 'purchase_roas'
                 ]
             
-            campaign = Campaign(campaign_id)
+            campaign = Campaign(actual_campaign_id)
             insights = campaign.get_insights(
                 fields=fields,
                 params={'date_preset': date_preset}
@@ -141,21 +147,59 @@ class MetaAdsSDK:
             logger.error(f"Error getting performance: {e}")
             return {"error": str(e)}
     
-    def search_campaigns(self, query: str) -> List[Dict]:
-        """Search campaigns by name"""
+    def search_campaigns(self, query: str = None, name: str = None) -> List[Dict]:
+        """Search campaigns by name or query
+        
+        Args:
+            query: Search query (for backward compatibility)
+            name: Campaign name to search for (alternative parameter name)
+        """
         try:
+            # Accept both 'query' and 'name' parameters
+            search_term = query or name
+            if not search_term:
+                return {"error": "Please provide a search query or name"}
+                
             campaigns = self.get_all_campaigns()
             if isinstance(campaigns, dict) and "error" in campaigns:
                 return campaigns
             
-            query_lower = query.lower()
+            search_lower = search_term.lower()
             return [
                 c for c in campaigns 
-                if query_lower in c.get('name', '').lower() or 
-                   query_lower in c.get('id', '').lower()
+                if search_lower in c.get('name', '').lower() or 
+                   search_lower in c.get('id', '').lower()
             ]
         except Exception as e:
             logger.error(f"Error searching campaigns: {e}")
+            return {"error": str(e)}
+    
+    def search_adsets(self, query: str = None, name: str = None, city: str = None) -> List[Dict]:
+        """Search adsets by name, query, or city
+        
+        Args:
+            query: Search query
+            name: Adset name to search for
+            city: City name (since adsets often represent cities in campaigns)
+        """
+        try:
+            # Accept multiple parameter names
+            search_term = query or name or city
+            if not search_term:
+                return {"error": "Please provide a search query, name, or city"}
+                
+            adsets = self._get_all_adsets()
+            if isinstance(adsets, dict) and "error" in adsets:
+                return adsets
+            
+            search_lower = search_term.lower()
+            return [
+                a for a in adsets 
+                if search_lower in a.get('name', '').lower() or 
+                   search_lower in a.get('id', '').lower()
+            ]
+        except Exception as e:
+            logger.error(f"Error searching adsets: {e}")
             return {"error": str(e)}
     
     def get_adsets_for_campaign(self, campaign_id: str) -> List[Dict]:
