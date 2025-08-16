@@ -69,23 +69,42 @@ class MetaAdsAgent:
         request = state["current_request"]
         
         # Use LLM to understand the request and plan SDK call
-        system_prompt = """You are a Meta Ads API expert. Analyze the user's request and determine:
-1. What Meta Ads data they need
-2. What SDK method to call
-3. What parameters to use
+        system_prompt = """You are a Meta Ads API expert. Analyze the user's request and determine what SDK method to call.
 
-Common operations:
-- Get all campaigns: sdk.get_all_campaigns()
-- Get campaign insights: sdk.get_campaign_insights(campaign_id, date_preset)
-- Get active campaigns: sdk.get_campaigns_by_status(['ACTIVE'])
-- Get spend/performance: sdk.get_performance_metrics(date_preset='today')
+The SDK has these methods for Meta Ads objects:
 
-Return a JSON with:
+CAMPAIGNS:
+- get_all_campaigns(): Returns all campaigns
+- get_campaigns_by_status(status=["ACTIVE"]): Filter campaigns by status
+- get_campaign_insights(campaign_id, date_preset="today"): Get metrics for specific campaign
+- search_campaigns(query): Search campaigns by name
+
+AD SETS:
+- get_adsets_for_campaign(campaign_id): Get all ad sets for a campaign
+- query("adsets", params): Get all ad sets
+
+ADS:
+- get_ads_for_adset(adset_id): Get all ads for an ad set
+- query("ads", params): Get all ads
+
+METRICS & INSIGHTS:
+- get_performance_metrics(date_preset="today"): Get overall performance metrics
+- query("insights", params): Get detailed insights
+
+GENERIC:
+- query(operation, params): For any other operation like "audiences", "creatives", etc.
+
+Based on the user's request, return a JSON with:
 {
     "intent": "what the user wants",
     "sdk_method": "method_name",
     "parameters": {...}
-}"""
+}
+
+Examples:
+- "show adsets" -> {"sdk_method": "query", "parameters": {"operation": "adsets"}}
+- "get ads for campaign X" -> {"sdk_method": "get_adsets_for_campaign", "parameters": {"campaign_id": "X"}}
+- "show audiences" -> {"sdk_method": "query", "parameters": {"operation": "audiences"}}"""
         
         messages = [
             SystemMessage(content=system_prompt),
@@ -125,6 +144,10 @@ Return a JSON with:
         method_name = plan.get("sdk_method", "get_all_campaigns")
         parameters = plan.get("parameters", {})
         
+        # Clean method name (remove 'sdk.' prefix if present)
+        if method_name.startswith("sdk."):
+            method_name = method_name[4:]
+        
         logger.info(f"Executing SDK method: {method_name} with params: {parameters}")
         
         try:
@@ -134,8 +157,11 @@ Return a JSON with:
                 # Try direct query if method doesn't exist
                 result = self.sdk.query(method_name, parameters)
             else:
-                # Call the method
-                result = method(**parameters)
+                # Call the method with parameters if provided
+                if parameters:
+                    result = method(**parameters)
+                else:
+                    result = method()
             
             state["sdk_response"] = result
             state["messages"].append(

@@ -62,14 +62,21 @@ class MetaAdsSDK:
             logger.error(f"Error getting campaigns: {e}")
             return {"error": str(e)}
     
-    def get_campaigns_by_status(self, statuses: List[str]) -> List[Dict]:
+    def get_campaigns_by_status(self, status: List[str] = None, statuses: List[str] = None) -> List[Dict]:
         """Get campaigns filtered by status"""
         try:
+            # Handle both 'status' and 'statuses' parameter names
+            status_list = status or statuses or []
+            
+            # If a single string was passed, convert to list
+            if isinstance(status_list, str):
+                status_list = [status_list]
+            
             campaigns = self.get_all_campaigns()
             if isinstance(campaigns, dict) and "error" in campaigns:
                 return campaigns
             
-            return [c for c in campaigns if c.get('status') in statuses]
+            return [c for c in campaigns if c.get('status') in status_list]
         except Exception as e:
             logger.error(f"Error filtering campaigns: {e}")
             return {"error": str(e)}
@@ -176,6 +183,50 @@ class MetaAdsSDK:
             logger.error(f"Error getting ads: {e}")
             return {"error": str(e)}
     
+    def _get_all_adsets(self) -> List[Dict]:
+        """Get all ad sets from the account"""
+        try:
+            adsets = self.ad_account.get_ad_sets(fields=[
+                'id', 'name', 'status', 'campaign_id', 'daily_budget'
+            ])
+            return [self._parse_object(adset) for adset in adsets]
+        except Exception as e:
+            logger.error(f"Error getting all adsets: {e}")
+            return {"error": str(e)}
+    
+    def _get_all_ads(self) -> List[Dict]:
+        """Get all ads from the account"""
+        try:
+            ads = self.ad_account.get_ads(fields=[
+                'id', 'name', 'status', 'adset_id', 'creative'
+            ])
+            return [self._parse_object(ad) for ad in ads]
+        except Exception as e:
+            logger.error(f"Error getting all ads: {e}")
+            return {"error": str(e)}
+    
+    def _get_audiences(self) -> List[Dict]:
+        """Get custom audiences"""
+        try:
+            audiences = self.ad_account.get_custom_audiences(fields=[
+                'id', 'name', 'description', 'approximate_count'
+            ])
+            return [self._parse_object(audience) for audience in audiences]
+        except Exception as e:
+            logger.error(f"Error getting audiences: {e}")
+            return {"error": str(e)}
+    
+    def _get_creatives(self) -> List[Dict]:
+        """Get ad creatives"""
+        try:
+            creatives = self.ad_account.get_ad_creatives(fields=[
+                'id', 'name', 'title', 'body'
+            ])
+            return [self._parse_object(creative) for creative in creatives]
+        except Exception as e:
+            logger.error(f"Error getting creatives: {e}")
+            return {"error": str(e)}
+    
     def query(self, operation: str, params: Dict = None) -> Any:
         """Generic query method for flexibility"""
         try:
@@ -190,9 +241,11 @@ class MetaAdsSDK:
                 "performance": lambda: self.get_performance_metrics(
                     params.get('date_preset', 'today')
                 ),
-                "search": lambda: self.search_campaigns(params.get('query', '')),
-                "adsets": lambda: self.get_adsets_for_campaign(params.get('campaign_id')),
-                "ads": lambda: self.get_ads_for_adset(params.get('adset_id'))
+                "adsets": lambda: self._get_all_adsets() if not params or 'campaign_id' not in params else self.get_adsets_for_campaign(params.get('campaign_id')),
+                "ads": lambda: self._get_all_ads() if not params or 'adset_id' not in params else self.get_ads_for_adset(params.get('adset_id')),
+                "audiences": lambda: self._get_audiences(),
+                "creatives": lambda: self._get_creatives(),
+                "search": lambda: self.search_campaigns(params.get('query', '') if params else '')
             }
             
             if operation in operations:
