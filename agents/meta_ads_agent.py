@@ -71,9 +71,10 @@ class MetaAdsAgent:
         # Get available SDK methods dynamically
         sdk_methods = [method for method in dir(self.sdk) if not method.startswith('_')]
         
-        system_prompt = f"""You are an intelligent Meta Ads assistant. You have access to an SDK with these methods:
+        # Build the system prompt without f-string for the JSON examples
+        system_prompt = """You are an intelligent Meta Ads assistant. You have access to an SDK with these methods:
 
-{', '.join(sdk_methods)}
+""" + ', '.join(sdk_methods) + """
 
 METHOD SELECTION PATTERNS (How to choose the right tool):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
