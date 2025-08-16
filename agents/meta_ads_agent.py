@@ -117,6 +117,17 @@ THINKING PATTERNS (How to approach problems):
    - get_campaign_insights = overall campaign metrics
    - get_adset_insights = metrics for specific city/location
 
+⚡ EFFICIENT API USAGE PATTERN:
+   - PREFER hierarchical navigation over global searches
+   - If you know the campaign, use get_adsets_for_campaign NOT search_adsets
+   - search_adsets loads ALL adsets (expensive, hits rate limits)
+   - get_adsets_for_campaign loads ONLY that campaign's adsets (efficient)
+   - Think: "What's the most direct path with fewest API calls?"
+   - Example: To update Brooklyn in Ryan Castro campaign:
+     INEFFICIENT: search_campaigns → search_adsets (all) → update
+     EFFICIENT: search_campaigns → get_adsets_for_campaign → update
+   - Fewer API calls = Less chance of rate limits
+
 🧩 UNDERSTANDING PARAMETERS:
    - param=None means optional - you can omit it
    - 'fields' parameters usually expect a list: ['field1', 'field2']
@@ -157,10 +168,15 @@ THINKING PATTERNS (How to approach problems):
    - SDK methods handle dollar→cent conversion internally
    - Example: "update Brooklyn to $200" → update_adset_budget(daily_budget=200)
    - Never multiply by 100 yourself - SDK does this
-   - To find specific adset: search or get campaign's adsets then filter
+   - EFFICIENT PATH: If updating adset in specific campaign:
+     1. Find campaign → 2. Get its adsets → 3. Find target → 4. Update
+     NOT: Find campaign → Search ALL adsets → Update
    - VERIFY SUCCESS: Check response has success=True before confirming
    - If update fails, report the error, don't claim success
    - After update, you may want to fetch updated values to confirm
+   - If you need to find Brooklyn adset and know it's in Ryan Castro campaign:
+     Use: get_adsets_for_campaign then filter/iterate
+     NOT: search_adsets (searches entire account)
 
 📊 INSIGHTS PATTERN - DATE SELECTION:
    - Insights methods accept date_preset parameter
@@ -321,17 +337,17 @@ Example - Getting metrics for each city:
     ]
 }
 
-Example - Updating budget (with error awareness):
+Example - Updating budget (EFFICIENT approach):
 {
-    "reasoning": "User wants to update Brooklyn adset budget. Must find campaign first, then adset, then update",
+    "reasoning": "User wants to update Brooklyn adset budget. Use hierarchical navigation for efficiency. Get campaign, then its adsets, find Brooklyn, update.",
     "intent": "Update Brooklyn adset budget to $200",
     "operations": [
         {"sdk_method": "search_campaigns", "parameters": {"query": "Ryan Castro"}},
-        {"sdk_method": "search_adsets", "parameters": {"query": "Brooklyn"}},
+        {"sdk_method": "get_adsets_for_campaign", "parameters": {"campaign_id": "result_from_0"}, "uses_result_from": 0},
         {"sdk_method": "update_adset_budget", "parameters": {"id": "result_from_1", "daily_budget": 200}, "uses_result_from": 1}
     ]
 }
-Note: If step 1 or 2 fails, step 3 cannot succeed
+Note: Step 2 uses get_adsets_for_campaign (efficient) not search_adsets (inefficient)
 
 The "iterate_on" field tells the system:
 - Run this operation multiple times
@@ -499,7 +515,17 @@ IMPORTANT:
                     # Extract ID from previous result and substitute placeholders
                     result_id = None
                     if isinstance(prev_result, list) and len(prev_result) > 0:
-                        result_id = prev_result[0].get("id")
+                        # For update operations, might need to find specific item
+                        if "update" in method_name.lower() and "brooklyn" in str(parameters).lower():
+                            # Find Brooklyn adset specifically
+                            brooklyn_adset = next((item for item in prev_result if "brooklyn" in item.get("name", "").lower()), None)
+                            if brooklyn_adset:
+                                result_id = brooklyn_adset.get("id")
+                                logger.info(f"Found Brooklyn adset: {brooklyn_adset.get('name')} with ID: {result_id}")
+                            else:
+                                result_id = prev_result[0].get("id")  # Fallback to first
+                        else:
+                            result_id = prev_result[0].get("id")
                     elif isinstance(prev_result, dict):
                         result_id = prev_result.get("id")
                         # Check if previous step had an error
