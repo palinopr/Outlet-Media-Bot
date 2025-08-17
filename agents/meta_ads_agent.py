@@ -1065,79 +1065,27 @@ STEP 1: Check for errors AND successes
   - If you see success=true, report SUCCESS not error
   - Only report error if there's an actual error field
 
-STEP 2: Locate the data
-  - Look for 'city_metrics' in the provided JSON
-  - It should be an array of city objects
-  - If not found, respond: "Unable to retrieve metrics data"
+STEP 2: Look for SUCCESS patterns:
+  - Search for fields containing 'success', 'updated', 'modified'
+  - Look for boolean values like {"success": true}
+  - Find confirmation messages
+  - If you see {"success": true} anywhere, the operation SUCCEEDED
 
-STEP 3: Extract values for each city
-  - For each city object in city_metrics:
-    - City name: city['city'] 
-    - Spend: city['spend'] (use EXACTLY as provided)
-    - ROAS: city['roas'] (use EXACTLY as provided)
-  - If a field is missing, write "N/A" not a number
+STEP 3: Extract operation result:
+  - What was updated? (look for item names, IDs)
+  - Did it succeed? (look for success indicators)
+  - What was the new value? (look for the updated amount)
 
-STEP 4: Validation
-  - ONLY use numbers that appear in the source data
-  - NEVER generate, estimate, or round numbers
-  - If you can't find a value, DO NOT make one up
-  - Better to show "Data unavailable" than fake numbers
+📝 FORMAT:
+✅ **Success**: [Describe what was updated]
+Example: ✅ **Success**: Budget updated to $200 for Brooklyn in Ryan Castro campaign
 
-STEP 5: Format the output
-  - Use the EXACT values from city_metrics
-  - NEVER round or modify values
-  - If spend is 388.08, write $388.08, NOT $388
-  - If spend is 52.91, write $52.91, NOT $53
-  - Always include 2 decimal places for spend values
-  - Copy numbers EXACTLY as they appear in the data
+OR if failed:
+❌ **Error**: [Describe what failed]
 
-⚠️ CRITICAL: USE EXACT NUMBERS FROM city_metrics - NO ROUNDING OR ESTIMATES ⚠️
-
-🛑 HALLUCINATION CHECK:
-Before outputting ANY number, ask yourself:
-  - Did I extract this EXACT value from city_metrics?
-  - Am I copying it precisely without modification?
-  - If not, STOP and write "N/A" instead
-
-⚠️ OPERATION SUCCESS CHECK:
-  - NEVER claim "successfully updated" unless you see success=True
-  - If operation failed, say "Unable to update due to error"
-  - Don't make up confirmation messages for failed operations
-  - IMPORTANT: If you see success=True in step_3_update_adset_budget, the update WORKED
-  - Look for: {"success": true, "message": "Successfully updated..."}
-  - If this exists, report SUCCESS not error!
-
-FORMATTING RULES:
-1. Clean up city names:
-   - "Sende Tour - LA" → "**Los Angeles**" 
-   - "Sende Tour - Brooklyn" → "**Brooklyn**"
-   - "Sende Tour - Miami" → "**Miami**"
-   - "Sende Tour - Houston" → "**Houston**"
-   - "Sende Tour - Chicago" → "**Chicago**"
-   - "Sende Tour - Retargeting - exclude sales" → "**Retargeting**"
-
-2. For spend and ROAS values:
-   - Use EXACT numbers from city_metrics - NO ROUNDING
-   - Always show exact value with 2 decimals: $388.08, $52.91
-   - NEVER round to whole dollars
-   - Copy the exact 'spend' value from city_metrics
-   - Format ROAS with exact decimals from source
-   - If ROAS > 20, add 💪 emoji
-   - Values are already in dollars, no conversion needed
-
-3. Present as a clean list or compact format:
-   📍 **City** → Spend: $X.XX | ROAS: X.Xx
-   
-4. Add summary at bottom:
-   - Total spend: Calculate the ACTUAL sum from city_metrics data
-   - Best performing city (highest ROAS from city_metrics)
-   - IMPORTANT: Sum the exact values, don't estimate
-
-5. Use emojis sparingly for visual appeal:
-   - 🎯 for campaign name
-   - 📍 for cities
-   - 💰 for totals
-   - 🏆 for best performer
+DO NOT look for specific field names like 'city_metrics'.
+Recognize patterns in the data structure.
+Be concise and professional
 
 Keep response under 1500 chars. Be concise and professional."""
         
