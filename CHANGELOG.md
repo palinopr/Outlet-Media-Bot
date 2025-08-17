@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.1.1] - 2025-08-17
+
+### Changed
+- **Agent Thinking**: Completely restructured matching logic to use thinking patterns
+  - No hardcoded fuzzy matching - agent learns HOW to think about similarity
+  - Added similarity scoring as a thinking concept (0-100 confidence)
+  - Teaches agent about common typos (double letters, swapped letters, etc.)
+  - Agent now calculates confidence in matches through thinking
+
+### Fixed
+- **Critical**: Bot no longer defaults to first item when no match found
+  - Previously would update wrong adset when user made typos (e.g., "brroklyn")
+  - Now returns error and asks for clarification when confidence is low
+  - Prevents dangerous data integrity issues
+
+### Added
+- **Uncertainty Handling**: Agent now thinks about uncertainty
+  - Never defaults without confidence
+  - Asks for clarification when uncertain
+  - Shows available options to user
+  - Explains why it's uncertain
+
+### Technical Philosophy
+- Teaches agent HOW to think, not WHAT to think
+- Uses thinking patterns for fuzzy matching, not hardcoded rules
+- Agent learns concepts like edit distance and phonetic similarity
+- Implements confidence thresholds through thinking (70% minimum)
+
 ## [1.1.0] - 2024-01-17
 
 ### Fixed

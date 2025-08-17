@@ -73,12 +73,41 @@ PATTERN RECOGNITION:
   • "Find X and update it" → Search pattern + Update pattern
   • "Get metrics for Y" → Data retrieval pattern
   • "Compare A and B" → Comparison pattern
+  • "Match user input to items" → Similarity matching pattern
 - Apply patterns broadly, not to specific cases
+
+SIMILARITY AND FUZZY MATCHING PATTERNS:
+- When matching text, think about:
+  • Character-level similarity (how many chars match?)
+  • Common typos (double letters, swapped letters, missing letters)
+  • Sound-alike words (phonetic similarity)
+  • Contextual meaning (does it make sense?)
+- Calculate confidence scores (0-100):
+  • 100%: Exact match
+  • 80-99%: Very likely match (minor typo)
+  • 60-79%: Possible match (needs consideration)
+  • <60%: Unlikely match (needs clarification)
+- Example: "brroklyn" vs "Brooklyn":
+  • Only difference is extra 'r' (common typo)
+  • High character overlap (7/8 chars match position)
+  • Confidence: ~90%
+
+UNCERTAINTY HANDLING:
+- When uncertain:
+  • NEVER default to first option
+  • Consider asking for clarification
+  • Show available options to user
+  • Explain why uncertain
+- Uncertainty triggers:
+  • Low confidence scores (<70%)
+  • Multiple similar matches
+  • No clear pattern match
 
 DECISION MAKING:
 - Based on your thinking, decide:
   • What needs to be done?
-  • What's the most efficient approach?
+  • What's the confidence level?
+  • Should we proceed or clarify?
   • What could go wrong?
   • How to verify success?
 
@@ -90,6 +119,9 @@ Think through this and return your reasoning as JSON:
     "pattern_recognized": "what pattern does this follow",
     "key_insights": ["insight 1", "insight 2"],
     "decision": "what to do based on this thinking",
+    "similarity_score": <number 0-100 if doing similarity matching>,
+    "confidence_level": "high/medium/low",
+    "needs_clarification": true/false,
     "potential_issues": ["issue 1", "issue 2"],
     "verification_approach": "how to verify this worked"
 }}"""
@@ -801,36 +833,114 @@ IMPORTANT:
                         # Pattern: When user mentions a specific item and we have a list
                         # THINK: How to match user intent to available items?
                         if "update" in method_name.lower() and prev_result:
-                            # Think about item selection
-                            selection_context = f"Need to select item from list. Request: {request}. Available items: {[item.get('name', '') for item in prev_result if isinstance(item, dict)]}"
+                            # Think about item selection with similarity and confidence
+                            selection_context = f"""
+                            Need to select item from list. Request: {request}
+                            Available items: {[item.get('name', '') for item in prev_result if isinstance(item, dict)]}
+                            
+                            THINKING PATTERN for item matching:
+                            1. Calculate similarity between request words and item names
+                            2. Consider typos and variations (e.g., 'brroklyn' vs 'Brooklyn')
+                            3. Assign confidence scores to matches
+                            4. If no confident match, ask for clarification
+                            5. NEVER default to first item without confidence
+                            """
                             selection_thought = await self.think(selection_context)
                             logger.info(f"Selection thinking: {selection_thought.get('decision')}")
                             
                             # Extract location/city names from request using pattern matching
                             words = request.split()
                             
-                            # Try to find matching item by name
-                            matched_item = None
+                            # THINK: Calculate similarity scores for each item
+                            best_match = None
+                            best_confidence = 0
+                            
                             for item in prev_result:
                                 item_name = item.get("name", "").lower()
-                                # Check each word in request against item names
+                                
+                                # Think about similarity for this item
+                                similarity_context = f"""
+                                Comparing user input words {words} with item name '{item_name}'.
+                                Consider:
+                                - Exact matches (100% confidence)
+                                - Partial matches (50-80% confidence)
+                                - Typos/variations (calculate edit distance)
+                                - Common misspellings
+                                """
+                                
+                                # Check each word for matches
                                 for word in words:
-                                    # Check all meaningful words (3+ chars), not just capitalized ones
-                                    # This catches "brooklyn", "Brooklyn", "miami", "Miami", etc.
                                     if len(word) > 2:
-                                        if word.lower() in item_name:
-                                            matched_item = item
-                                            logger.info(f"Found matching item: {item.get('name')} for request keyword: {word}")
+                                        word_lower = word.lower()
+                                        
+                                        # Exact substring match
+                                        if word_lower in item_name:
+                                            confidence = 100
+                                            logger.info(f"Exact match: '{word}' in '{item.get('name')}' (confidence: {confidence}%)")
+                                            if confidence > best_confidence:
+                                                best_match = item
+                                                best_confidence = confidence
                                             break
-                                if matched_item:
-                                    break
+                                        
+                                        # Think about fuzzy matching
+                                        fuzzy_thought = await self.think(f"""
+                                        Is '{word_lower}' likely a typo or variation of any part of '{item_name}'?
+                                        Consider common typos like double letters, swapped letters, missing letters.
+                                        Example: 'brroklyn' could be 'brooklyn' (double 'r' typo)
+                                        Calculate similarity score 0-100.
+                                        """)
+                                        
+                                        # Check if thinking identified a likely match
+                                        if fuzzy_thought.get("similarity_score", 0) > 70:
+                                            confidence = fuzzy_thought.get("similarity_score", 0)
+                                            logger.info(f"Fuzzy match: '{word}' ~ '{item.get('name')}' (confidence: {confidence}%)")
+                                            if confidence > best_confidence:
+                                                best_match = item
+                                                best_confidence = confidence
                             
-                            if matched_item:
-                                result_id = matched_item.get("id")
+                            # THINK: Should we use this match or ask for clarification?
+                            decision_context = f"""
+                            Best match found: {best_match.get('name') if best_match else 'None'}
+                            Confidence: {best_confidence}%
+                            
+                            Decision pattern:
+                            - If confidence >= 80%: Use the match
+                            - If confidence 50-79%: Consider asking for confirmation
+                            - If confidence < 50%: Must ask for clarification
+                            - NEVER use first item as default
+                            """
+                            
+                            decision_thought = await self.think(decision_context)
+                            logger.info(f"Match decision: {decision_thought.get('decision')}")
+                            
+                            if best_match and best_confidence >= 70:
+                                result_id = best_match.get("id")
+                                logger.info(f"Using matched item: {best_match.get('name')} (confidence: {best_confidence}%)")
                             else:
-                                # No specific match found, use first item
-                                logger.info("No specific item match found, using first item")
-                                result_id = prev_result[0].get("id")
+                                # No confident match - THINK about what to do
+                                uncertainty_thought = await self.think(f"""
+                                No confident match found for user request.
+                                Available items: {[item.get('name', '') for item in prev_result]}
+                                User might have made a typo or referenced something unclear.
+                                
+                                CRITICAL: Do NOT default to first item.
+                                Options:
+                                1. Ask user to clarify which item they meant
+                                2. Show available options to user
+                                3. Return error about ambiguous selection
+                                """)
+                                
+                                logger.warning(f"No confident match found. Best was {best_confidence}% confidence.")
+                                logger.info(f"Uncertainty handling: {uncertainty_thought.get('approach')}")
+                                
+                                # Return error instead of defaulting
+                                results.append({
+                                    "error": f"Could not confidently match your request to an item. Please specify more clearly.",
+                                    "available_items": [item.get('name', '') for item in prev_result],
+                                    "best_guess": best_match.get('name') if best_match else None,
+                                    "confidence": best_confidence
+                                })
+                                continue  # Skip this operation
                         else:
                             result_id = prev_result[0].get("id")
                     elif isinstance(prev_result, dict):

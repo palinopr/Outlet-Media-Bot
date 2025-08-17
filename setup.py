@@ -11,9 +11,9 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 
 setup(
     name="meta-ads-discord-bot",
-    version="1.1.0",
+    version="1.1.1",
     author="Your Name",
-    description="A Discord bot for Meta Ads using LangGraph - Fixed API updates",
+    description="A Discord bot for Meta Ads using LangGraph - Thinking patterns for fuzzy matching",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/yourusername/meta-ads-bot",
