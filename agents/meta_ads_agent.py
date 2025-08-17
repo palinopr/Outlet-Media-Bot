@@ -77,20 +77,22 @@ PATTERN RECOGNITION:
 - Apply patterns broadly, not to specific cases
 
 SIMILARITY AND FUZZY MATCHING PATTERNS:
-- When matching text, think about:
-  • Character-level similarity (how many chars match?)
-  • Common typos (double letters, swapped letters, missing letters)
-  • Sound-alike words (phonetic similarity)
-  • Contextual meaning (does it make sense?)
-- Calculate confidence scores (0-100):
-  • 100%: Exact match
-  • 80-99%: Very likely match (minor typo)
-  • 60-79%: Possible match (needs consideration)
-  • <60%: Unlikely match (needs clarification)
-- Example: "brroklyn" vs "Brooklyn":
-  • Only difference is extra 'r' (common typo)
-  • High character overlap (7/8 chars match position)
-  • Confidence: ~90%
+- When matching text, think through this DECOMPOSITION PROCESS:
+  • Step 1: Break both strings into individual characters
+  • Step 2: Compare character-by-character from the start
+  • Step 3: Count how many consecutive characters match
+  • Step 4: Find the longest common substring
+  • Step 5: Calculate what percentage of the word matches
+- HOW TO THINK about similarity:
+  • "brroklyn" vs "Brooklyn": Remove one 'r' → exact match! (likely typo)
+  • "brroklyn" vs "Retargeting": No common substring > 3 chars (not similar)
+  • "brookln" vs "Brooklyn": Add one 'y' → exact match! (likely typo)
+- THINKING PATTERN for confidence:
+  • If removing/adding 1 char gives exact match: 85-95% confidence
+  • If longest common substring < 50% of word length: <30% confidence
+  • If words share no meaningful substring: 0% confidence
+- ALWAYS think: "What's the longest common substring?"
+  • This reveals TRUE similarity, not surface-level matching
 
 UNCERTAINTY HANDLING:
 - When uncertain:
@@ -855,18 +857,11 @@ IMPORTANT:
                             best_match = None
                             best_confidence = 0
                             
+                            # First, collect all potential matches WITHOUT calling think() in a loop
+                            potential_matches = []
+                            
                             for item in prev_result:
                                 item_name = item.get("name", "").lower()
-                                
-                                # Think about similarity for this item
-                                similarity_context = f"""
-                                Comparing user input words {words} with item name '{item_name}'.
-                                Consider:
-                                - Exact matches (100% confidence)
-                                - Partial matches (50-80% confidence)
-                                - Typos/variations (calculate edit distance)
-                                - Common misspellings
-                                """
                                 
                                 # Check each word for matches
                                 for word in words:
@@ -877,41 +872,60 @@ IMPORTANT:
                                         if word_lower in item_name:
                                             confidence = 100
                                             logger.info(f"Exact match: '{word}' in '{item.get('name')}' (confidence: {confidence}%)")
-                                            if confidence > best_confidence:
-                                                best_match = item
-                                                best_confidence = confidence
+                                            potential_matches.append((item, confidence, word, "exact"))
                                             break
                                         
-                                        # Think about fuzzy matching
-                                        fuzzy_thought = await self.think(f"""
-                                        Is '{word_lower}' likely a typo or variation of any part of '{item_name}'?
-                                        Consider common typos like double letters, swapped letters, missing letters.
-                                        Example: 'brroklyn' could be 'brooklyn' (double 'r' typo)
-                                        Calculate similarity score 0-100.
-                                        """)
-                                        
-                                        # Check if thinking identified a likely match
-                                        if fuzzy_thought.get("similarity_score", 0) > 70:
-                                            confidence = fuzzy_thought.get("similarity_score", 0)
-                                            logger.info(f"Fuzzy match: '{word}' ~ '{item.get('name')}' (confidence: {confidence}%)")
-                                            if confidence > best_confidence:
-                                                best_match = item
-                                                best_confidence = confidence
+                                        # Character-level similarity (typo detection)
+                                        # Check against each word in the item name
+                                        for item_word in item_name.split():
+                                            if len(item_word) >= 4:  # Only check meaningful words
+                                                # Simple character matching
+                                                word_chars = list(word_lower)
+                                                item_chars = list(item_word)
+                                                
+                                                # Count matching characters at same positions
+                                                matches = sum(1 for i in range(min(len(word_chars), len(item_chars))) 
+                                                            if word_chars[i] == item_chars[i])
+                                                
+                                                # Calculate similarity percentage
+                                                max_len = max(len(word_chars), len(item_chars))
+                                                similarity = (matches / max_len) * 100 if max_len > 0 else 0
+                                                
+                                                # If high similarity, likely a typo
+                                                if similarity >= 70:
+                                                    logger.info(f"Fuzzy match: '{word}' ~ '{item_word}' in '{item.get('name')}' (similarity: {similarity:.0f}%)")
+                                                    potential_matches.append((item, similarity, word, "fuzzy"))
+                                                    break
                             
-                            # THINK: Should we use this match or ask for clarification?
-                            decision_context = f"""
-                            Best match found: {best_match.get('name') if best_match else 'None'}
-                            Confidence: {best_confidence}%
+                            # Find best match from potentials
+                            if potential_matches:
+                                # Sort by confidence
+                                potential_matches.sort(key=lambda x: x[1], reverse=True)
+                                best_match, best_confidence, matched_word, match_type = potential_matches[0]
+                                
+                                # Only use ONE think() call to validate the best match
+                                if match_type == "fuzzy" and best_confidence < 90:
+                                    validation_thought = await self.think(f"""
+                                    VALIDATE fuzzy match using DECOMPOSITION:
+                                    User word: '{matched_word}'
+                                    Matched item: '{best_match.get('name')}'
+                                    Initial confidence: {best_confidence:.0f}%
+                                    
+                                    Is this a likely typo? Consider:
+                                    - Character positions and overlap
+                                    - Common typo patterns (doubled letters, transpositions)
+                                    - Context of the request
+                                    
+                                    Should we use this match or ask for clarification?
+                                    """)
+                                    
+                                    # Update confidence based on validation
+                                    if validation_thought.get("confidence"):
+                                        best_confidence = validation_thought.get("confidence")
+                                        logger.info(f"Validated confidence: {best_confidence}%")
                             
-                            Decision pattern:
-                            - If confidence >= 80%: Use the match
-                            - If confidence 50-79%: Consider asking for confirmation
-                            - If confidence < 50%: Must ask for clarification
-                            - NEVER use first item as default
-                            """
-                            
-                            decision_thought = await self.think(decision_context)
-                            logger.info(f"Match decision: {decision_thought.get('decision')}")
+                            # Make decision based on confidence (no extra think() call needed)
+                            logger.info(f"Best match: {best_match.get('name') if best_match else 'None'} (confidence: {best_confidence:.0f}%)")
                             
                             if best_match and best_confidence >= 70:
                                 result_id = best_match.get("id")
