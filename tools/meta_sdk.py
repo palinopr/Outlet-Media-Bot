@@ -403,7 +403,7 @@ class MetaAdsSDK:
             
             # Update the adset
             adset = AdSet(actual_id)
-            response = adset.update(params=params)
+            response = adset.api_update(params=params)
             
             logger.info(f"Updated adset {actual_id} budget: {params}")
             return {
@@ -457,7 +457,7 @@ class MetaAdsSDK:
             
             # Update the campaign
             campaign = Campaign(actual_id)
-            response = campaign.update(params=params)
+            response = campaign.api_update(params=params)
             
             logger.info(f"Updated campaign {actual_id} budget: {params}")
             return {
@@ -482,7 +482,7 @@ class MetaAdsSDK:
                 return {"error": "Please provide adset_id or id"}
             
             adset = AdSet(actual_id)
-            response = adset.update(params={'status': 'PAUSED'})
+            response = adset.api_update(params={'status': 'PAUSED'})
             
             logger.info(f"Paused adset {actual_id}")
             return {
@@ -504,7 +504,7 @@ class MetaAdsSDK:
                 return {"error": "Please provide adset_id or id"}
             
             adset = AdSet(actual_id)
-            response = adset.update(params={'status': 'ACTIVE'})
+            response = adset.api_update(params={'status': 'ACTIVE'})
             
             logger.info(f"Resumed adset {actual_id}")
             return {
@@ -526,7 +526,7 @@ class MetaAdsSDK:
                 return {"error": "Please provide campaign_id or id"}
             
             campaign = Campaign(actual_id)
-            response = campaign.update(params={'status': 'PAUSED'})
+            response = campaign.api_update(params={'status': 'PAUSED'})
             
             logger.info(f"Paused campaign {actual_id}")
             return {
@@ -548,7 +548,7 @@ class MetaAdsSDK:
                 return {"error": "Please provide campaign_id or id"}
             
             campaign = Campaign(actual_id)
-            response = campaign.update(params={'status': 'ACTIVE'})
+            response = campaign.api_update(params={'status': 'ACTIVE'})
             
             logger.info(f"Resumed campaign {actual_id}")
             return {

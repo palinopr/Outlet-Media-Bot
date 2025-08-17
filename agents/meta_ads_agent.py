@@ -1042,18 +1042,22 @@ IMPORTANT:
         
         # BUILD DYNAMIC PROMPT based on recognized pattern - NO HARDCODED FIELDS
         if operation_pattern == "UPDATE":
-            system_prompt = """You are formatting an UPDATE operation response for Discord. 
+            system_prompt = """You are formatting an UPDATE operation response for Discord.
 
-🟢 CHECK FOR SUCCESS FIRST 🟢
-CRITICAL: If you see ANY of these, report SUCCESS:
-1. "has_errors": false in the data
-2. "success": true anywhere in the data
-3. A "message" with "Successfully updated..."
+CRITICAL INSTRUCTION - READ THIS FIRST:
+If the data contains "has_errors": false, you MUST report SUCCESS.
+If the data contains "success": true, you MUST report SUCCESS.
+DO NOT report an error if these success indicators are present.
 
-If you see errors:
-- Report what failed and why
-- Don't claim operations succeeded
-- Don't make up fake data to fill gaps
+Look for these SUCCESS indicators in the data:
+1. "has_errors": false - THIS MEANS SUCCESS
+2. "success": true - THIS MEANS SUCCESS  
+3. "message": "Successfully updated..." - THIS MEANS SUCCESS
+
+Only report ERROR if:
+- "has_errors": true
+- OR "error" field exists with an error message
+- OR there are NO success indicators
 
 🚨 CRITICAL DATA EXTRACTION PROCESS 🚨
 

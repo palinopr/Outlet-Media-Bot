@@ -18,7 +18,7 @@ async def test_bot_flow():
         print("\n>>> UNDERSTAND_REQUEST called")
         result = await original_understand(state)
         if 'final_answer' in result and result['final_answer']:
-            print(f"    SET final_answer: {result['final_answer'][:100]}")
+            print(f"    UNDERSTAND SET final_answer: {result['final_answer'][:100]}")
         return result
     agent.understand_request = trace_understand
     
@@ -27,7 +27,7 @@ async def test_bot_flow():
         print("\n>>> REVIEW_THINKING called")
         result = await original_review(state)
         if 'final_answer' in result and result['final_answer']:
-            print(f"    SET final_answer: {result['final_answer'][:100]}")
+            print(f"    REVIEW SET final_answer: {result['final_answer'][:100]}")
         return result
     agent.review_thinking = trace_review
     
@@ -36,7 +36,7 @@ async def test_bot_flow():
         print("\n>>> VERIFY_EXECUTION called")
         result = await original_verify(state)
         if 'final_answer' in result and result['final_answer']:
-            print(f"    SET final_answer: {result['final_answer'][:100]}")
+            print(f"    VERIFY SET final_answer: {result['final_answer'][:100]}")
         return result
     agent.verify_execution = trace_verify
     
@@ -81,23 +81,24 @@ async def test_bot_flow():
         print("-" * 70)
         
         sdk_response = state.get("sdk_response", {})
-        print("\nSDK_RESPONSE IN FORMAT:")
-        print(json.dumps(sdk_response, indent=2) if isinstance(sdk_response, dict) else str(sdk_response))
         
-        # Get data_str that will be sent to LLM
-        import json
-        data_str = json.dumps(sdk_response, indent=2) if sdk_response else "No data"
+        # Check what we're looking for
+        has_errors = sdk_response.get("has_errors", None)
+        print(f"\nhas_errors field: {has_errors}")
         
-        print("\nDATA_STR (sent to LLM):")
-        print("-" * 30)
-        print(data_str[:1000])
-        print("-" * 30)
+        # Look for success in results
+        if "multi_step_results" in sdk_response:
+            for i, result in enumerate(sdk_response["multi_step_results"]):
+                if isinstance(result, dict) and "success" in result:
+                    print(f"Result {i} has success: {result['success']}")
+                    if "message" in result:
+                        print(f"  Message: {result['message']}")
         
         # Call original
         result = await original_format(state)
         
         print("\nFORMAT_RESPONSE RESULT:")
-        print(result.get("final_answer", "")[:500])
+        print(result.get("final_answer", ""))
         
         return result
     
