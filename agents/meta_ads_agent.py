@@ -815,7 +815,9 @@ IMPORTANT:
                                 item_name = item.get("name", "").lower()
                                 # Check each word in request against item names
                                 for word in words:
-                                    if len(word) > 2 and word[0].isupper():  # Likely a proper noun
+                                    # Check all meaningful words (3+ chars), not just capitalized ones
+                                    # This catches "brooklyn", "Brooklyn", "miami", "Miami", etc.
+                                    if len(word) > 2:
                                         if word.lower() in item_name:
                                             matched_item = item
                                             logger.info(f"Found matching item: {item.get('name')} for request keyword: {word}")
@@ -1042,39 +1044,38 @@ IMPORTANT:
         if operation_pattern == "UPDATE":
             system_prompt = """You are formatting an UPDATE operation response for Discord. 
 
-🔴 ERROR HANDLING FIRST 🔴
-BEFORE formatting any data, check:
-1. Is there an 'error' field in the data?
-2. Are there 'has_errors' or failed operations?
-3. If yes, REPORT THE ERROR, don't make up success
+🟢 CHECK FOR SUCCESS FIRST 🟢
+CRITICAL: If you see ANY of these, report SUCCESS:
+1. "has_errors": false in the data
+2. "success": true anywhere in the data
+3. A "message" with "Successfully updated..."
 
 If you see errors:
 - Report what failed and why
 - Don't claim operations succeeded
 - Don't make up fake data to fill gaps
-- Be honest: "Unable to update budget due to API error"
 
 🚨 CRITICAL DATA EXTRACTION PROCESS 🚨
 
 You MUST follow these steps EXACTLY:
 
-STEP 1: Check for errors AND successes
-  - Look for 'error' fields in the data
-  - Look for 'has_errors' flag
-  - ALSO look for 'success': true in update operations
-  - If you see success=true, report SUCCESS not error
-  - Only report error if there's an actual error field
+STEP 1: Look for SUCCESS indicators
+  - Find "has_errors" field - if it's false, REPORT SUCCESS
+  - Find "success" field - if it's true, REPORT SUCCESS
+  - The LAST item in multi_step_results contains the update result
+  - Extract the "message" field from successful updates
 
-STEP 2: Look for SUCCESS patterns:
-  - Search for fields containing 'success', 'updated', 'modified'
-  - Look for boolean values like {"success": true}
-  - Find confirmation messages
-  - If you see {"success": true} anywhere, the operation SUCCEEDED
+STEP 2: Find the update confirmation
+  - Look in multi_step_results for dictionaries with 'success': True
+  - These contain the update confirmation
+  - Extract the updated values and IDs from these
+  - The 'message' field often contains what was updated
 
-STEP 3: Extract operation result:
-  - What was updated? (look for item names, IDs)
-  - Did it succeed? (look for success indicators)
-  - What was the new value? (look for the updated amount)
+STEP 3: Extract details from successful updates
+  - Look for 'updated_fields' to see what changed
+  - Look for 'message' to get confirmation text
+  - Look at adset names in earlier results to identify what was updated
+  - Match IDs between results to understand what was changed
 
 📝 FORMAT:
 ✅ **Success**: [Describe what was updated]
